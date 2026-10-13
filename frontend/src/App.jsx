@@ -10,6 +10,7 @@ import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
 import Register from "./pages/Register.jsx";
+import Settings from "./pages/Settings.jsx";
 
 // Pantallas que exigen sesión. El frontend solo redirige: quien decide de
 // verdad si algo está permitido es siempre la API.
@@ -54,7 +55,8 @@ export default function App() {
     <div className="min-h-screen">
       {user && <Header />}
 
-      <main className="mx-auto max-w-4xl px-4 py-6">
+      {/* pb-24 en móvil: deja sitio para la barra de navegación inferior. */}
+      <main className={`mx-auto max-w-4xl px-4 py-6 ${user ? "pb-24 sm:pb-6" : ""}`}>
         {/* mode="wait": la página que sale termina antes de que entre la nueva. */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -69,6 +71,10 @@ export default function App() {
               <Route path="/" element={<Private><Home /></Private>} />
               <Route path="/cambiar-clave" element={<Private><ChangePassword /></Private>} />
               <Route path="/miembros" element={<Private adminOnly><Members /></Private>} />
+              <Route
+                path="/configuracion"
+                element={<Private adminOnly><Settings /></Private>}
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </motion.div>

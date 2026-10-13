@@ -121,6 +121,28 @@ solo esas variables, nunca colores sueltos.
   responde `404`.
 - Las vistas públicas que modifican datos llevan `csrf_protect`.
 - Sin sesión la API responde `401`; sin permiso, `403`.
+- Catálogos en la app `catalogs`. Los del sistema (`MovementType`, `Currency`)
+  se cargan con migraciones de datos; los de cada familia (`Category`,
+  `PaymentMethod`) se crean con `catalogs/defaults.py` al registrar la familia.
+- Nada se borra: categorías, métodos de pago y usuarios se desactivan.
+- Si una spec añade datos que toda familia debe tener, incluye una migración
+  que se los dé también a las familias que ya existen.
+
+## Datos de ejemplo y pruebas en el navegador
+
+- `python manage.py seed_demo` crea "Familia Demo" con `admin@demo.test`,
+  `editor@demo.test` y `lector@demo.test`. La contraseña es `DEMO_PASSWORD` de
+  `backend/.env`. Solo funciona con `DEBUG=True`.
+- El usuario tiene su familia real en la base de desarrollo y suele tener la
+  sesión abierta en `localhost:5183`. **No hagas `flush` ni borres datos, y no
+  pruebes con su familia.** Para probar en el navegador sin cerrarle la sesión,
+  levanta una segunda instancia en `127.0.0.1` (otra cookie) y entra con la
+  familia de ejemplo:
+
+  ```bash
+  FRONTEND_ORIGIN=http://127.0.0.1:5184 python manage.py runserver 127.0.0.1:8011
+  VITE_API_URL=http://127.0.0.1:8011/api npx vite --port 5184 --host 127.0.0.1
+  ```
 
 ## Skills a usar
 
@@ -139,7 +161,7 @@ solo esas variables, nunca colores sueltos.
 |---|---|---|
 | 001 | Fundaciones: estructura, Postgres, esqueleto Django y React, `.env`, rate limit, base de animaciones | Implementada |
 | 002 | Autenticación, familia y roles | Implementada |
-| 003 | Catálogos parametrizados | Pendiente |
+| 003 | Catálogos parametrizados | Implementada |
 | 004 | Registro de ingresos y gastos | Pendiente |
 | 005 | Tasas BCV y vista en USD, bolívares y euros | Pendiente |
 | 006 | Dashboard interactivo | Pendiente |

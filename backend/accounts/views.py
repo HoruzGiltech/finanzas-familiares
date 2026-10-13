@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from catalogs.defaults import create_default_catalogs
+
 from .models import Family, User
 from .permissions import IsFamilyAdmin
 from .serializers import (
@@ -55,9 +57,10 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # atomic: o se crean la familia y el usuario, o no se crea nada.
+        # atomic: o se crean la familia, sus catálogos y el usuario, o no se crea nada.
         with transaction.atomic():
             family = Family.objects.create(name=data["family_name"])
+            create_default_catalogs(family)
             user = User.objects.create_user(
                 email=data["email"],
                 password=data["password"],
