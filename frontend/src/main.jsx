@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
 import App from "./App.jsx";
+import { AuthProvider } from "./auth/AuthContext.jsx";
 import "./index.css";
 
 // Accesibilidad: si la persona pidió "reducir movimiento" en su sistema,
@@ -15,7 +16,9 @@ if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
 );

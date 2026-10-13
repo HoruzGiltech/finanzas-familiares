@@ -1,4 +1,5 @@
 from django.db import connection
+from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -21,3 +22,11 @@ def health(request):
     if database_is_up():
         return Response({"status": "ok", "database": "ok"})
     return Response({"status": "error", "database": "error"}, status=503)
+
+
+def csrf_failure(request, reason=""):
+    """Django la llama cuando un POST llega sin token CSRF válido."""
+    return JsonResponse(
+        {"detail": "Falta el token de seguridad. Recarga la página e inténtalo de nuevo."},
+        status=403,
+    )

@@ -69,8 +69,24 @@ npm install
 npm run dev
 ```
 
-Abre <http://localhost:5183>. Debes ver dos tarjetas en verde: "API" y
-"Base de datos".
+Abre <http://localhost:5183>. Verás la pantalla de inicio de sesión. Pulsa
+"Créala aquí" para registrar tu familia: quedarás como administrador.
+
+## Usuarios y contraseñas
+
+- El administrador agrega a los demás miembros desde "Miembros". La aplicación
+  muestra una contraseña temporal una sola vez; el miembro debe cambiarla al entrar.
+- Si un miembro olvida su contraseña, el administrador le genera otra desde
+  "Miembros".
+- Si la olvida el único administrador, se restablece desde la terminal:
+
+  ```powershell
+  cd backend; .venv\Scripts\activate
+  python manage.py changepassword correo@ejemplo.com
+  ```
+
+- Para entrar al panel de Django (<http://localhost:8010/admin/>) hace falta un
+  superusuario: `python manage.py createsuperuser`.
 
 ## Día a día
 

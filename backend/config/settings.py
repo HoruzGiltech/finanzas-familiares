@@ -4,6 +4,7 @@ Configuración de Django.
 Todo lo que cambia entre máquinas o es secreto se lee del archivo backend/.env.
 """
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,6 +41,13 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
+# La sesión caduca tras 14 días sin uso (cada petición renueva el plazo).
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
+SESSION_SAVE_EVERY_REQUEST = True
+
+# Respuesta en JSON cuando falta o no coincide el token CSRF.
+CSRF_FAILURE_VIEW = "core.views.csrf_failure"
+
 
 # --- Aplicaciones -----------------------------------------------------------
 
@@ -53,6 +61,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "core",
+    "accounts",
 ]
 
 MIDDLEWARE = [
@@ -109,10 +118,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "accounts.authentication.SessionAuth",
     ],
-    # Cerrado por defecto: cada vista pública debe declararlo explícitamente.
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # Cerrado por defecto: hace falta sesión y no estar usando una contraseña
+    # temporal. Cada vista pública debe declararlo explícitamente.
+    "DEFAULT_PERMISSION_CLASSES": ["accounts.permissions.IsFamilyMember"],
+    # Cuántos proxies de confianza hay delante de Django. Con 0, el rate limit
+    # identifica al cliente por su IP real e ignora la cabecera X-Forwarded-For,
+    # que cualquiera puede falsificar para saltarse el límite. Al desplegar
+    # detrás de un proxy (nginx, etc.) se pone 1.
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "0")),
     # Rate limit: se aplica a toda la API.
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
@@ -127,10 +142,16 @@ REST_FRAMEWORK = {
 }
 
 
-# --- Contraseñas ------------------------------------------------------------
+# --- Usuarios y contraseñas -------------------------------------------------
+
+# Modelo de usuario propio: entra con correo y pertenece a una familia.
+AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "OPTIONS": {"user_attributes": ["email", "full_name"]},
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -145,3 +166,11 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+
+
+# --- Solo durante las pruebas ----------------------------------------------
+
+# El cifrado real de contraseñas es lento a propósito. En las pruebas usamos
+# uno rápido para que no tarden minutos. Nunca se usa fuera de `manage.py test`.
+if "test" in sys.argv:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]

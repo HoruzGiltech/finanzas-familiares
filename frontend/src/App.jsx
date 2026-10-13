@@ -1,39 +1,60 @@
 import { AnimatePresence, motion } from "motion/react";
-import { NavLink, Route, Routes, useLocation } from "react-router";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 
+import { useAuth } from "./auth/AuthContext.jsx";
+import Header from "./components/Header.jsx";
+import Skeleton from "./components/Skeleton.jsx";
 import { pageTransition } from "./lib/motion.js";
-import About from "./pages/About.jsx";
+import ChangePassword from "./pages/ChangePassword.jsx";
 import Home from "./pages/Home.jsx";
+import Login from "./pages/Login.jsx";
+import Members from "./pages/Members.jsx";
+import Register from "./pages/Register.jsx";
 
-function navLinkClass({ isActive }) {
-  const base =
-    "rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-150 " +
-    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600";
-  return isActive
-    ? `${base} bg-emerald-600 text-white`
-    : `${base} text-slate-600 hover:bg-slate-200`;
+// Pantallas que exigen sesión. El frontend solo redirige: quien decide de
+// verdad si algo está permitido es siempre la API.
+function Private({ adminOnly = false, children }) {
+  const { user } = useAuth();
+  const location = useLocation();
+
+  if (!user) {
+    return <Navigate to="/entrar" replace />;
+  }
+  // Con una contraseña temporal, lo único disponible es cambiarla.
+  if (user.must_change_password && location.pathname !== "/cambiar-clave") {
+    return <Navigate to="/cambiar-clave" replace />;
+  }
+  if (adminOnly && user.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
+// Pantallas solo para quien no ha entrado (entrar y registro).
+function PublicOnly({ children }) {
+  const { user } = useAuth();
+  return user ? <Navigate to="/" replace /> : children;
 }
 
 export default function App() {
+  const { user } = useAuth();
   const location = useLocation();
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-          <span className="text-lg font-semibold">Finanzas Familiares</span>
-          <nav className="flex gap-1">
-            <NavLink to="/" className={navLinkClass}>
-              Inicio
-            </NavLink>
-            <NavLink to="/acerca" className={navLinkClass}>
-              Acerca
-            </NavLink>
-          </nav>
-        </div>
-      </header>
+  // Todavía no sabemos si hay sesión: mostramos un esqueleto en vez de un parpadeo.
+  if (user === undefined) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-4 px-4 py-8" aria-label="Cargando">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-32" />
+      </div>
+    );
+  }
 
-      <main className="mx-auto max-w-3xl px-4 py-8">
+  return (
+    <div className="min-h-screen">
+      {user && <Header />}
+
+      <main className="mx-auto max-w-4xl px-4 py-6">
         {/* mode="wait": la página que sale termina antes de que entre la nueva. */}
         <AnimatePresence mode="wait">
           <motion.div
@@ -43,8 +64,12 @@ export default function App() {
             exit={pageTransition.exit}
           >
             <Routes location={location}>
-              <Route path="/" element={<Home />} />
-              <Route path="/acerca" element={<About />} />
+              <Route path="/entrar" element={<PublicOnly><Login /></PublicOnly>} />
+              <Route path="/registro" element={<PublicOnly><Register /></PublicOnly>} />
+              <Route path="/" element={<Private><Home /></Private>} />
+              <Route path="/cambiar-clave" element={<Private><ChangePassword /></Private>} />
+              <Route path="/miembros" element={<Private adminOnly><Members /></Private>} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </motion.div>
         </AnimatePresence>

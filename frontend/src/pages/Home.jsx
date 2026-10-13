@@ -1,61 +1,61 @@
+import { ShieldCheck, Users, Wallet } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
 
-import Skeleton from "../components/Skeleton.jsx";
-import StatusCard from "../components/StatusCard.jsx";
-import { apiGet } from "../lib/api.js";
-import { fadeIn, staggerList } from "../lib/motion.js";
+import { useAuth } from "../auth/AuthContext.jsx";
+import Card from "../components/Card.jsx";
+import { getRole } from "../lib/roles.js";
+import { slideUp, staggerList } from "../lib/motion.js";
+
+function InfoCard({ icon: Icon, label, value, detail }) {
+  return (
+    <motion.div variants={slideUp}>
+      <Card className="h-full">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Icon aria-hidden="true" className="h-4 w-4 text-primary" />
+          {label}
+        </div>
+        <p className="mt-2 text-lg font-semibold">{value}</p>
+        {detail && <p className="mt-1 text-sm text-muted-foreground">{detail}</p>}
+      </Card>
+    </motion.div>
+  );
+}
 
 export default function Home() {
-  // health: null mientras carga; después, la respuesta de /api/health/.
-  const [health, setHealth] = useState(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    apiGet("/health/")
-      .then(({ data }) => setHealth(data))
-      .catch((err) => setError(err.message));
-  }, []);
+  const { user } = useAuth();
+  const role = getRole(user.role);
+  const firstName = user.full_name.split(" ")[0];
 
   return (
     <section>
-      <h1 className="text-2xl font-bold">Estado del sistema</h1>
-      <p className="mt-1 text-slate-600">
-        Comprueba que la aplicación, la API y la base de datos están conectadas.
+      <h1 className="text-2xl font-bold">Hola, {firstName}</h1>
+      <p className="mt-1 text-muted-foreground">
+        Este es el espacio de tu familia.
       </p>
 
-      <div className="mt-6">
-        {error && (
-          <motion.p
-            role="alert"
-            variants={fadeIn}
-            initial="hidden"
-            animate="visible"
-            className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"
-          >
-            {error}
-          </motion.p>
-        )}
-
-        {!error && !health && (
-          <div className="grid gap-4 sm:grid-cols-2" aria-label="Cargando estado">
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-          </div>
-        )}
-
-        {health && (
-          <motion.div
-            variants={staggerList}
-            initial="hidden"
-            animate="visible"
-            className="grid gap-4 sm:grid-cols-2"
-          >
-            <StatusCard title="API" ok={health.status === "ok"} />
-            <StatusCard title="Base de datos" ok={health.database === "ok"} />
-          </motion.div>
-        )}
-      </div>
+      <motion.div
+        variants={staggerList}
+        initial="hidden"
+        animate="visible"
+        className="mt-6 grid gap-4 sm:grid-cols-2"
+      >
+        <InfoCard icon={Users} label="Familia" value={user.family.name} />
+        <InfoCard
+          icon={ShieldCheck}
+          label="Tu rol"
+          value={role.label}
+          detail={role.description}
+        />
+        <motion.div variants={slideUp} className="sm:col-span-2">
+          <Card className="border-dashed text-center">
+            <Wallet aria-hidden="true" className="mx-auto h-8 w-8 text-muted-foreground" />
+            <p className="mt-2 font-semibold">Aquí verás el resumen de tus finanzas</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              El registro de ingresos y gastos y el dashboard llegan en los próximos pasos.
+            </p>
+          </Card>
+        </motion.div>
+      </motion.div>
     </section>
   );
 }

@@ -4,7 +4,7 @@ export default function Skeleton({ className = "" }) {
   return (
     <div
       aria-hidden="true"
-      className={`rounded-lg bg-slate-200 motion-safe:animate-pulse ${className}`}
+      className={`rounded-lg bg-muted motion-safe:animate-pulse ${className}`}
     />
   );
 }

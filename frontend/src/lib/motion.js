@@ -26,12 +26,35 @@ export const slideUp = {
 // Contenedor de una lista: hace que sus hijos entren uno detrás de otro.
 export const staggerList = {
   hidden: {},
-  visible: { transition: { staggerChildren: 0.08 } },
+  visible: { transition: { staggerChildren: 0.06 } },
 };
 
-// Transición entre páginas.
+// Transición entre páginas. Salir es más rápido que entrar.
 export const pageTransition = {
   initial: { opacity: 0, y: 8 },
   animate: { opacity: 1, y: 0, transition: { duration: duration.normal, ease } },
   exit: { opacity: 0, y: -8, transition: { duration: duration.fast, ease } },
 };
+
+// Fondo oscuro detrás de un modal.
+export const backdrop = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: { duration: duration.fast } },
+  exit: { opacity: 0, transition: { duration: duration.fast } },
+};
+
+// Ventana del modal: aparece creciendo un poco.
+export const modalPanel = {
+  initial: { opacity: 0, y: 16, scale: 0.97 },
+  animate: { opacity: 1, y: 0, scale: 1, transition: { duration: duration.normal, ease } },
+  exit: { opacity: 0, y: 8, scale: 0.98, transition: { duration: duration.fast, ease } },
+};
+
+// Sacudida breve: "esos datos no son correctos".
+export const shake = {
+  x: [0, -8, 8, -6, 6, 0],
+  transition: { duration: duration.slow },
+};
+
+// Respuesta al pulsar un botón.
+export const press = { scale: 0.97, transition: { duration: duration.fast } };

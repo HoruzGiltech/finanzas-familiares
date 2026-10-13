@@ -98,6 +98,30 @@ La aplicación debe sentirse hecha por un profesional de frontend.
 - **Responsive**: debe funcionar bien en el móvil, que es donde se registran
   los gastos.
 
+### Sistema de diseño
+
+Definido en `frontend/src/index.css` (bloque `@theme`). Los componentes usan
+solo esas variables, nunca colores sueltos.
+
+- **Colores**: azul `primary` para acciones, verde `accent` para ingresos y
+  resultados positivos, rojo `danger` para errores y acciones delicadas. Fondo
+  claro. El color nunca es la única señal: va acompañado de icono o texto.
+- **Tipografía**: IBM Plex Sans.
+- **Iconos**: Lucide (`lucide-react`). Nunca emojis.
+- **Componentes base** en `frontend/src/components/`: `Button`, `Field`,
+  `Card`, `Modal`, `Alert`, `Skeleton`. Reutilízalos antes de crear otros.
+- **Tamaño táctil**: botones, campos y enlaces de navegación de 44 px de alto
+  como mínimo (`min-h-11`).
+
+## Backend: convenciones
+
+- Permisos en `accounts/permissions.py`: `IsFamilyMember` (por defecto en toda
+  la API), `CanEditMovements` e `IsFamilyAdmin`.
+- Toda consulta se filtra por `request.user.family`. Un objeto de otra familia
+  responde `404`.
+- Las vistas públicas que modifican datos llevan `csrf_protect`.
+- Sin sesión la API responde `401`; sin permiso, `403`.
+
 ## Skills a usar
 
 | Skill | Cuándo |
@@ -114,7 +138,7 @@ La aplicación debe sentirse hecha por un profesional de frontend.
 | Spec | Contenido | Estado |
 |---|---|---|
 | 001 | Fundaciones: estructura, Postgres, esqueleto Django y React, `.env`, rate limit, base de animaciones | Implementada |
-| 002 | Autenticación, familia y roles | Pendiente |
+| 002 | Autenticación, familia y roles | Implementada |
 | 003 | Catálogos parametrizados | Pendiente |
 | 004 | Registro de ingresos y gastos | Pendiente |
 | 005 | Tasas BCV y vista en USD, bolívares y euros | Pendiente |

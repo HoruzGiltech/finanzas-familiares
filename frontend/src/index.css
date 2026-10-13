@@ -1,1 +1,37 @@
 @import "tailwindcss";
+
+/*
+  Sistema de diseño. Los colores y la tipografía se definen aquí una sola vez
+  y se usan con clases de Tailwind: bg-primary, text-muted-foreground, etc.
+  Ningún componente escribe colores sueltos.
+*/
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --color-primary: #1e40af; /* azul: acciones principales */
+  --color-primary-hover: #1e3a8a;
+  --color-primary-soft: #dbeafe; /* fondo suave para resaltar */
+  --color-accent: #059669; /* verde: ingresos y resultados positivos */
+  --color-accent-soft: #d1fae5;
+  --color-danger: #dc2626; /* rojo: errores y acciones delicadas */
+  --color-danger-soft: #fee2e2;
+
+  --color-background: #f8fafc;
+  --color-foreground: #020617;
+  --color-card: #ffffff;
+  --color-muted: #e8ecf1;
+  --color-muted-foreground: #475569;
+  --color-border: #e2e8f0;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+/* Foco visible y uniforme para quien navega con teclado. */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
