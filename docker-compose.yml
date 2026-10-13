@@ -1,0 +1,23 @@
+# Solo la base de datos. Django y React corren directo en la máquina.
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    # Usuario, contraseña y nombre de la base salen de backend/.env
+    env_file:
+      - ./backend/.env
+    ports:
+      # Puerto de la máquina : puerto dentro del contenedor.
+      # Usamos 5434 porque 5432 y 5433 están reservados para otros proyectos.
+      # 127.0.0.1 hace que solo esta máquina pueda conectarse.
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db_data:

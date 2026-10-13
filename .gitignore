@@ -1,0 +1,23 @@
+# Secretos: nunca se suben
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+backend/staticfiles/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Editores y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Configuración local de Claude Code
+.claude/settings.local.json
