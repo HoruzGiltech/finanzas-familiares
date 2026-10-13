@@ -13,6 +13,7 @@
   --color-primary-soft: #dbeafe; /* fondo suave para resaltar */
   --color-accent: #059669; /* verde: ingresos y resultados positivos */
   --color-accent-soft: #d1fae5;
+  --color-accent-strong: #047857; /* verde para texto: contraste suficiente sobre blanco */
   --color-danger: #dc2626; /* rojo: errores y acciones delicadas */
   --color-danger-soft: #fee2e2;
 

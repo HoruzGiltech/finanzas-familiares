@@ -46,7 +46,8 @@ export default function Modal({ title, onClose, children }) {
         aria-labelledby={titleId}
         // Un clic dentro de la ventana no debe cerrarla.
         onClick={(event) => event.stopPropagation()}
-        className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-xl"
+        // Si el contenido no cabe en la pantalla (formularios largos en el móvil), se desplaza.
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-card p-5 shadow-xl"
       >
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 id={titleId} className="text-lg font-semibold">

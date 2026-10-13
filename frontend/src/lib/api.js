@@ -2,7 +2,7 @@
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-// Token de seguridad que Django exige en cada POST o PATCH.
+// Token de seguridad que Django exige en cada POST, PATCH o DELETE.
 let csrfToken = null;
 
 async function send(path, options = {}) {
@@ -61,6 +61,7 @@ async function request(method, path, body) {
 export const apiGet = (path) => request("GET", path);
 export const apiPost = (path, body) => request("POST", path, body);
 export const apiPatch = (path, body) => request("PATCH", path, body);
+export const apiDelete = (path) => request("DELETE", path);
 
 // Convierte la respuesta de error de la API en algo cómodo para un formulario:
 //   { fields: { email: "Ya existe..." }, general: "Mensaje que no es de un campo" }

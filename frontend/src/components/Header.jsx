@@ -1,4 +1,4 @@
-import { House, KeyRound, LogOut, Settings, Users, Wallet } from "lucide-react";
+import { ArrowLeftRight, House, KeyRound, LogOut, Settings, Users, Wallet } from "lucide-react";
 import { NavLink } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.jsx";
@@ -36,6 +36,21 @@ export default function Header() {
             <p className="text-sm font-medium">{user.full_name}</p>
             <p className="text-xs text-muted-foreground">{getRole(user.role).label}</p>
           </div>
+          {/* En móvil "Contraseña" vive aquí arriba, como icono: en la barra
+              inferior no caben cinco enlaces con su texto. */}
+          {canNavigate && (
+            <NavLink
+              to="/cambiar-clave"
+              aria-label="Cambiar contraseña"
+              className={({ isActive }) =>
+                "inline-flex h-11 w-11 items-center justify-center rounded-lg transition-colors " +
+                "duration-150 hover:bg-muted sm:hidden " +
+                (isActive ? "text-primary" : "text-muted-foreground")
+              }
+            >
+              <KeyRound aria-hidden="true" className="h-4 w-4" />
+            </NavLink>
+          )}
           <button
             type="button"
             onClick={logout}
@@ -63,6 +78,10 @@ export default function Header() {
               <House aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
               Inicio
             </NavLink>
+            <NavLink to="/movimientos" className={navLinkClass}>
+              <ArrowLeftRight aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
+              Movimientos
+            </NavLink>
             {isAdmin && (
               <NavLink to="/miembros" className={navLinkClass}>
                 <Users aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
@@ -75,7 +94,8 @@ export default function Header() {
                 Configuración
               </NavLink>
             )}
-            <NavLink to="/cambiar-clave" className={navLinkClass}>
+            {/* Solo en escritorio; en móvil está en la barra superior. */}
+            <NavLink to="/cambiar-clave" className={(state) => `${navLinkClass(state)} max-sm:hidden`}>
               <KeyRound aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
               Contraseña
             </NavLink>

@@ -1,5 +1,6 @@
-import { ShieldCheck, Users, Wallet } from "lucide-react";
+import { ArrowRight, ShieldCheck, Users, Wallet } from "lucide-react";
 import { motion } from "motion/react";
+import { Link } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.jsx";
 import Card from "../components/Card.jsx";
@@ -47,12 +48,21 @@ export default function Home() {
           detail={role.description}
         />
         <motion.div variants={slideUp} className="sm:col-span-2">
-          <Card className="border-dashed text-center">
-            <Wallet aria-hidden="true" className="mx-auto h-8 w-8 text-muted-foreground" />
-            <p className="mt-2 font-semibold">Aquí verás el resumen de tus finanzas</p>
+          <Card className="text-center">
+            <Wallet aria-hidden="true" className="mx-auto h-8 w-8 text-primary" />
+            <p className="mt-2 font-semibold">Ingresos y gastos del mes</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              El registro de ingresos y gastos y el dashboard llegan en los próximos pasos.
+              {user.role === "viewer"
+                ? "Consulta lo que ha entrado y salido este mes."
+                : "Anota un movimiento o revisa lo que ha entrado y salido este mes."}
             </p>
+            <Link
+              to="/movimientos"
+              className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-white transition-colors duration-150 hover:bg-primary-hover"
+            >
+              Ir a Movimientos
+              <ArrowRight aria-hidden="true" className="h-4 w-4" />
+            </Link>
           </Card>
         </motion.div>
       </motion.div>

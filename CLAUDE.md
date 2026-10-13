@@ -104,12 +104,16 @@ Definido en `frontend/src/index.css` (bloque `@theme`). Los componentes usan
 solo esas variables, nunca colores sueltos.
 
 - **Colores**: azul `primary` para acciones, verde `accent` para ingresos y
-  resultados positivos, rojo `danger` para errores y acciones delicadas. Fondo
+  resultados positivos (`accent-strong` cuando es texto), rojo `danger` para
+  errores, gastos y acciones delicadas. Fondo
   claro. El color nunca es la única señal: va acompañado de icono o texto.
 - **Tipografía**: IBM Plex Sans.
 - **Iconos**: Lucide (`lucide-react`). Nunca emojis.
 - **Componentes base** en `frontend/src/components/`: `Button`, `Field`,
-  `Card`, `Modal`, `Alert`, `Skeleton`. Reutilízalos antes de crear otros.
+  `Card`, `Modal`, `Alert`, `Skeleton`, `IconButton`, `SegmentedControl`.
+  Reutilízalos antes de crear otros.
+- **Montos y fechas**: siempre con `frontend/src/lib/format.js`. El símbolo de
+  la moneda sale del catálogo, no del código.
 - **Tamaño táctil**: botones, campos y enlaces de navegación de 44 px de alto
   como mínimo (`min-h-11`).
 
@@ -124,15 +128,20 @@ solo esas variables, nunca colores sueltos.
 - Catálogos en la app `catalogs`. Los del sistema (`MovementType`, `Currency`)
   se cargan con migraciones de datos; los de cada familia (`Category`,
   `PaymentMethod`) se crean con `catalogs/defaults.py` al registrar la familia.
-- Nada se borra: categorías, métodos de pago y usuarios se desactivan.
+- Nada se borra: categorías, métodos de pago y usuarios se desactivan. La
+  única excepción son los movimientos, que sí se borran de verdad.
+- Movimientos en la app `movements`. El monto se guarda positivo y en USD; si
+  es ingreso o gasto lo dice su categoría. El administrador corrige y borra
+  cualquiera; el editor, solo los que anotó él (`Movement.can_be_edited_by`).
 - Si una spec añade datos que toda familia debe tener, incluye una migración
   que se los dé también a las familias que ya existen.
 
 ## Datos de ejemplo y pruebas en el navegador
 
 - `python manage.py seed_demo` crea "Familia Demo" con `admin@demo.test`,
-  `editor@demo.test` y `lector@demo.test`. La contraseña es `DEMO_PASSWORD` de
-  `backend/.env`. Solo funciona con `DEBUG=True`.
+  `editor@demo.test` y `lector@demo.test`, y le carga tres meses de movimientos
+  si no tiene ninguno. La contraseña es `DEMO_PASSWORD` de `backend/.env`. Solo
+  funciona con `DEBUG=True`.
 - El usuario tiene su familia real en la base de desarrollo y suele tener la
   sesión abierta en `localhost:5183`. **No hagas `flush` ni borres datos, y no
   pruebes con su familia.** Para probar en el navegador sin cerrarle la sesión,
@@ -162,7 +171,7 @@ solo esas variables, nunca colores sueltos.
 | 001 | Fundaciones: estructura, Postgres, esqueleto Django y React, `.env`, rate limit, base de animaciones | Implementada |
 | 002 | Autenticación, familia y roles | Implementada |
 | 003 | Catálogos parametrizados | Implementada |
-| 004 | Registro de ingresos y gastos | Pendiente |
+| 004 | Registro de ingresos y gastos | Implementada |
 | 005 | Tasas BCV y vista en USD, bolívares y euros | Pendiente |
 | 006 | Dashboard interactivo | Pendiente |
 | 007 | Comparación contra meses anteriores | Pendiente |

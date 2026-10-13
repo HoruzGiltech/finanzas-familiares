@@ -93,8 +93,9 @@ Abre <http://localhost:5183>. Verás la pantalla de inicio de sesión. Pulsa
   ```
 
   Crea "Familia Demo" con `admin@demo.test`, `editor@demo.test` y
-  `lector@demo.test`. La contraseña de los tres es el valor de `DEMO_PASSWORD`
-  en `backend\.env`. Solo funciona en desarrollo.
+  `lector@demo.test`, con tres meses de movimientos de ejemplo. La contraseña
+  de los tres es el valor de `DEMO_PASSWORD` en `backend\.env`. Solo funciona
+  en desarrollo.
 
 - Para entrar al panel de Django (<http://localhost:8010/admin/>) hace falta un
   superusuario: `python manage.py createsuperuser`.

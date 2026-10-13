@@ -58,3 +58,19 @@ export const shake = {
 
 // Respuesta al pulsar un botón.
 export const press = { scale: 0.97, transition: { duration: duration.fast } };
+
+// Renglón de una lista que cambia: el nuevo aparece y el borrado sale hacia un lado.
+// Se usa como `variants`, con custom={posición} para que entren uno detrás de otro
+// (con tope, para que una lista larga no haga esperar).
+export const listItem = {
+  initial: { opacity: 0, y: 12 },
+  animate: (index = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: duration.slow, ease, delay: Math.min(index, 8) * 0.03 },
+  }),
+  exit: { opacity: 0, x: -16, transition: { duration: duration.fast, ease } },
+};
+
+// Movimiento de los demás renglones al ocupar el hueco del que salió.
+export const layoutTransition = { layout: { duration: duration.slow, ease } };

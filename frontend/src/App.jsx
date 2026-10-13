@@ -9,6 +9,7 @@ import ChangePassword from "./pages/ChangePassword.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
 import Members from "./pages/Members.jsx";
+import Movements from "./pages/Movements.jsx";
 import Register from "./pages/Register.jsx";
 import Settings from "./pages/Settings.jsx";
 
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="/entrar" element={<PublicOnly><Login /></PublicOnly>} />
               <Route path="/registro" element={<PublicOnly><Register /></PublicOnly>} />
               <Route path="/" element={<Private><Home /></Private>} />
+              <Route path="/movimientos" element={<Private><Movements /></Private>} />
               <Route path="/cambiar-clave" element={<Private><ChangePassword /></Private>} />
               <Route path="/miembros" element={<Private adminOnly><Members /></Private>} />
               <Route
