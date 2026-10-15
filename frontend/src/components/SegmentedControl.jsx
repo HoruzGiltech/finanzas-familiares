@@ -1,5 +1,6 @@
 // Grupo de botones donde siempre hay uno elegido: "Todos | Ingresos | Gastos".
-// options = [{ value, label }]
+// options = [{ value, label, ariaLabel?, disabled? }]. ariaLabel sirve cuando la
+// etiqueta visible es un símbolo ("Bs.") que el lector de pantalla leería mal.
 export default function SegmentedControl({ label, options, value, onChange, className = "" }) {
   return (
     <div
@@ -14,10 +15,12 @@ export default function SegmentedControl({ label, options, value, onChange, clas
             key={option.value}
             type="button"
             aria-pressed={selected}
+            aria-label={option.ariaLabel}
+            disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={
-              "min-h-11 flex-1 cursor-pointer rounded-md px-3 text-sm font-semibold " +
-              "transition-colors duration-150 " +
+              "min-h-11 min-w-11 flex-1 cursor-pointer rounded-md px-3 text-sm font-semibold " +
+              "transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 " +
               (selected
                 ? "bg-card text-primary shadow-sm"
                 : "text-muted-foreground hover:text-foreground")

@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
-from catalogs.models import Category, MovementType, PaymentMethod
+from catalogs.models import Category, Currency, MovementType, PaymentMethod
 
 from .models import Movement
 
@@ -61,6 +61,7 @@ def create_demo_movements(family):
     today = timezone.localdate()
     types = {movement_type.code: movement_type for movement_type in MovementType.objects.all()}
     users = {user.email: user for user in family.members.all()}
+    usd = Currency.objects.get(is_base=True)  # los de ejemplo se anotan en dólares
     movements = []
 
     for months_ago, factor in enumerate(EXPENSE_FACTORS):
@@ -82,6 +83,8 @@ def create_demo_movements(family):
                     ),
                     payment_method=find_or_create(PaymentMethod, method_name, family=family),
                     amount=amount,
+                    original_amount=amount,
+                    original_currency=usd,
                     date=date,
                     description=description,
                     created_by=users[email],

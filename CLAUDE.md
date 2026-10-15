@@ -135,6 +135,9 @@ solo esas variables, nunca colores sueltos.
   cualquiera; el editor, solo los que anotó él (`Movement.can_be_edited_by`).
 - Si una spec añade datos que toda familia debe tener, incluye una migración
   que se los dé también a las familias que ya existen.
+- Tasas en la app `rates`. `rates.services.today_rate()` da la tasa de hoy (y
+  consulta al BCV si hace falta); las conversiones usan sus `to_usd` y
+  `from_usd`. Las pruebas nunca salen a internet: simulan `rates.sources`.
 
 ## Datos de ejemplo y pruebas en el navegador
 
@@ -172,7 +175,7 @@ solo esas variables, nunca colores sueltos.
 | 002 | Autenticación, familia y roles | Implementada |
 | 003 | Catálogos parametrizados | Implementada |
 | 004 | Registro de ingresos y gastos | Implementada |
-| 005 | Tasas BCV y vista en USD, bolívares y euros | Pendiente |
+| 005 | Tasas BCV y vista en USD, bolívares y euros | Implementada |
 | 006 | Dashboard interactivo | Pendiente |
 | 007 | Comparación contra meses anteriores | Pendiente |
 | 008 | Exportación a CSV y dashboard a PDF | Pendiente |

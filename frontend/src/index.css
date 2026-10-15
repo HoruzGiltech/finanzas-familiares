@@ -16,6 +16,8 @@
   --color-accent-strong: #047857; /* verde para texto: contraste suficiente sobre blanco */
   --color-danger: #dc2626; /* rojo: errores y acciones delicadas */
   --color-danger-soft: #fee2e2;
+  --color-warning: #b45309; /* ámbar: avisos que no son errores (tasa no actualizada) */
+  --color-warning-soft: #fef3c7;
 
   --color-background: #f8fafc;
   --color-foreground: #020617;

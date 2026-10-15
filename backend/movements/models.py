@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 
 from accounts.models import Family
-from catalogs.models import Category, PaymentMethod
+from catalogs.models import Category, Currency, PaymentMethod
 
 
 class Movement(models.Model):
@@ -15,7 +15,15 @@ class Movement(models.Model):
     category = models.ForeignKey(Category, on_delete=models.PROTECT)
     payment_method = models.ForeignKey(PaymentMethod, on_delete=models.PROTECT)
     # En USD y siempre positivo: el signo lo pone el tipo de movimiento.
+    # Es el que vale para todas las cuentas y nunca cambia con la tasa.
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    # Lo que la persona escribió, en la moneda en que lo escribió (spec 005).
+    original_amount = models.DecimalField(max_digits=16, decimal_places=2)
+    original_currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
+    # Bolívares por unidad de la moneda original al convertir. Vacío si fue en USD.
+    exchange_rate = models.DecimalField(
+        max_digits=20, decimal_places=8, null=True, blank=True
+    )
     date = models.DateField()  # el día en que ocurrió, no el día en que se anotó
     description = models.CharField(max_length=200, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)

@@ -11,7 +11,10 @@ from rest_framework.test import APIClient
 
 from accounts.models import Family, User
 from catalogs.defaults import create_default_catalogs
-from catalogs.models import Category, PaymentMethod
+from catalogs.models import Category, Currency, PaymentMethod
+
+from rates.models import ExchangeRate
+from rates.sources import SourceError
 
 from .models import Movement
 
@@ -23,6 +26,13 @@ class BaseTestCase(TestCase):
 
     def setUp(self):
         cache.clear()  # el rate limit guarda sus contadores en la caché
+        # Las pruebas nunca salen a internet: el BCV y DolarAPI "no responden".
+        patcher = mock.patch("rates.sources.download", side_effect=SourceError("sin red"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        quiet = mock.patch("rates.services.logger")
+        quiet.start()
+        self.addCleanup(quiet.stop)
         self.today = timezone.localdate()
         self.family = self.make_family("Familia Pérez")
         self.other_family = self.make_family("Familia Rojas")
@@ -76,6 +86,8 @@ class BaseTestCase(TestCase):
             category=self.category(category, user.family),
             payment_method=self.payment_method("Efectivo", user.family),
             amount=Decimal(amount),
+            original_amount=Decimal(amount),
+            original_currency=Currency.objects.get(code="USD"),
             date=date or self.today,
             created_by=user,
         )
@@ -350,6 +362,154 @@ class EditAndDeleteTests(BaseTestCase):
 
         for response in responses:
             self.assertEqual(response.status_code, 401)
+
+
+class CurrencyTests(BaseTestCase):
+    """Anotar y ver en bolívares y euros (spec 005). Tasa de hoy: 1 $ = 400 Bs., 1 € = 440 Bs."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_rate("400", "440")
+
+    def set_rate(self, usd, eur):
+        """Guarda la tasa de hoy como leída del BCV: así no hace falta consultarlo."""
+        for code, value in {"USD": usd, "EUR": eur}.items():
+            ExchangeRate.objects.update_or_create(
+                currency=Currency.objects.get(code=code),
+                date=self.today,
+                defaults={
+                    "bs_per_unit": Decimal(value),
+                    "source": ExchangeRate.BCV,
+                    "fetched_at": timezone.now(),
+                },
+            )
+
+    def create(self, **changes):
+        return self.client.post("/api/movements/", self.payload(**changes))
+
+    def test_bolivars_are_saved_in_dollars_with_what_was_written(self):
+        response = self.create(amount="1000.00", currency="VES")
+
+        self.assertEqual(response.status_code, 201)
+        movement = Movement.objects.get()
+        self.assertEqual(movement.amount, Decimal("2.50"))
+        self.assertEqual(movement.original_amount, Decimal("1000.00"))
+        self.assertEqual(movement.original_currency.code, "VES")
+        self.assertEqual(movement.exchange_rate, Decimal("1"))
+        self.assertEqual(response.json()["original_currency"], "VES")
+
+    def test_euros_go_through_the_bolivar_with_rounding(self):
+        # 7,77 € x 440 / 400 = 8,547 $ -> 8,55 $
+        self.create(amount="7.77", currency="EUR")
+
+        movement = Movement.objects.get()
+        self.assertEqual(movement.amount, Decimal("8.55"))
+        self.assertEqual(movement.exchange_rate, Decimal("440"))
+
+    def test_without_currency_it_is_dollars(self):
+        self.create(amount="45.30")
+
+        movement = Movement.objects.get()
+        self.assertEqual(movement.amount, Decimal("45.30"))
+        self.assertEqual(movement.original_currency.code, "USD")
+        self.assertIsNone(movement.exchange_rate)
+
+    def test_editing_without_touching_the_money_keeps_the_dollars(self):
+        movement_id = self.create(amount="1000.00", currency="VES").json()["id"]
+        url = f"/api/movements/{movement_id}/"
+        self.set_rate("500", "550")  # al día siguiente la tasa cambió
+
+        self.client.patch(url, {"category": self.category("Transporte").id})
+        self.client.patch(url, {"amount": "1000.00", "currency": "VES"})
+        self.assertEqual(Movement.objects.get().amount, Decimal("2.50"))
+
+        self.client.patch(url, {"amount": "1500.00"})
+        self.assertEqual(Movement.objects.get().amount, Decimal("3.00"))
+
+        self.client.patch(url, {"currency": "USD"})
+        movement = Movement.objects.get()
+        self.assertEqual(movement.amount, Decimal("1500.00"))
+        self.assertIsNone(movement.exchange_rate)
+
+    def test_bad_currencies_and_amounts_are_rejected(self):
+        Currency.objects.filter(code="EUR").update(is_active=False)
+        cases = [
+            ({"currency": "XXX"}, "currency"),
+            ({"currency": "EUR"}, "currency"),
+            ({"amount": "0.01", "currency": "VES"}, "amount"),  # 0,000025 $
+            ({"amount": "4000000000.00", "currency": "VES"}, "amount"),  # 10 millones de $
+            ({"amount": "10000000.00"}, "amount"),
+        ]
+        for changes, field in cases:
+            with self.subTest(changes=changes):
+                response = self.create(**changes)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+        self.assertEqual(Movement.objects.count(), 0)
+
+    def test_a_movement_keeps_its_currency_after_it_is_deactivated(self):
+        movement_id = self.create(amount="7.77", currency="EUR").json()["id"]
+        Currency.objects.filter(code="EUR").update(is_active=False)
+        url = f"/api/movements/{movement_id}/"
+
+        kept = self.client.patch(url, {"amount": "7.77", "currency": "EUR", "description": "x"})
+        other = self.create(amount="7.77", currency="EUR")
+
+        self.assertEqual(kept.status_code, 200)
+        self.assertEqual(other.status_code, 400)
+
+    def test_list_in_bolivars_converts_amounts_and_totals_with_todays_rate(self):
+        self.make_movement(category="Salario", amount="100.00")
+        self.make_movement(amount="33.33")
+        self.make_movement(amount="0.01")
+
+        data = self.client.get("/api/movements/?currency=VES").json()
+        in_dollars = self.client.get("/api/movements/").json()
+
+        self.assertEqual(data["currency"], "VES")
+        self.assertEqual(data["rate"]["status"], "current")
+        self.assertEqual(
+            data["totals"], {"income": "40000.00", "expense": "13336.00", "balance": "26664.00"}
+        )
+        self.assertEqual(
+            sorted(movement["amount"] for movement in data["movements"]),
+            ["13332.00", "4.00", "40000.00"],
+        )
+        self.assertEqual(in_dollars["currency"], "USD")
+        self.assertEqual(in_dollars["totals"]["expense"], "33.34")
+
+    def test_list_in_euros(self):
+        self.make_movement(amount="11.00")
+
+        data = self.client.get("/api/movements/?currency=EUR").json()
+
+        self.assertEqual(data["movements"][0]["amount"], "10.00")
+        self.assertEqual(data["movements"][0]["original_amount"], "11.00")
+        self.assertEqual(data["movements"][0]["original_currency"], "USD")
+
+    def test_without_any_rate_only_dollars_can_be_used(self):
+        ExchangeRate.objects.all().delete()
+
+        listed = self.client.get("/api/movements/?currency=VES")
+        created = self.create(amount="1000.00", currency="VES")
+        in_dollars = self.client.get("/api/movements/")
+
+        self.assertEqual(listed.status_code, 400)
+        self.assertEqual(listed.json()["currency"], ["Todavía no hay tasa del BCV; usa dólares."])
+        self.assertEqual(created.status_code, 400)
+        self.assertIn("currency", created.json())
+        self.assertEqual(in_dollars.status_code, 200)
+        self.assertEqual(in_dollars.json()["rate"]["status"], "missing")
+
+    def test_an_outdated_rate_is_still_used(self):
+        ExchangeRate.objects.update(
+            date=self.today - datetime.timedelta(days=1),
+            fetched_at=timezone.now() - datetime.timedelta(days=1),
+        )
+
+        data = self.client.get("/api/movements/?currency=VES").json()
+
+        self.assertEqual(data["rate"]["status"], "outdated")
 
 
 @override_settings(DEBUG=True)  # seed_demo se niega a funcionar sin DEBUG

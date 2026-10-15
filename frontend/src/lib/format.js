@@ -7,13 +7,17 @@ const numberFormat = new Intl.NumberFormat("es-VE", {
 });
 const dayFormat = new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long" });
 const monthFormat = new Intl.DateTimeFormat("es", { month: "long", year: "numeric" });
+const weekdayFormat = new Intl.DateTimeFormat("es", { weekday: "long" });
 
 // "1234.5" con símbolo "$" -> "$1.234,50". El signo, si hace falta, va delante: "−$20,00".
+// Los símbolos que terminan en letra o punto llevan espacio: "Bs. 1.234,50". Es un
+// espacio irrompible, para que símbolo y cifra no se separen al saltar de línea.
 // Number() se usa solo para mostrar; las cuentas las hace siempre el backend.
 export function formatMoney(amount, symbol, sign = "") {
   const value = Number(amount);
   const prefix = value < 0 ? "−" : sign;
-  return `${prefix}${symbol}${numberFormat.format(Math.abs(value))}`;
+  const space = /[\p{L}.]$/u.test(symbol) ? " " : "";
+  return `${prefix}${symbol}${space}${numberFormat.format(Math.abs(value))}`;
 }
 
 function capitalize(text) {
@@ -36,6 +40,11 @@ function toText(date) {
 // "2026-10-12" -> "Lunes, 12 de octubre"
 export function formatDay(dateText) {
   return capitalize(dayFormat.format(toDate(dateText)));
+}
+
+// "2026-10-10" -> "sábado"
+export function formatWeekday(dateText) {
+  return weekdayFormat.format(toDate(dateText));
 }
 
 // "2026-10" -> "Octubre de 2026"

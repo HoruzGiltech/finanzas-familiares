@@ -22,8 +22,8 @@ function withDayHeaders(movements) {
 }
 
 // Movimientos agrupados por día. Los botones de corregir y borrar solo salen
-// en los que la API marca con can_edit.
-export default function MovementList({ movements, symbol, onEdit, onDelete }) {
+// en los que la API marca con can_edit. Los montos vienen ya en `currency`.
+export default function MovementList({ movements, currency, symbols, onEdit, onDelete }) {
   // Solo al aparecer la lista los renglones entran uno detrás de otro; los que
   // se añadan después entran sin espera.
   const firstRender = useRef(true);
@@ -49,7 +49,8 @@ export default function MovementList({ movements, symbol, onEdit, onDelete }) {
             {row.movement ? (
               <MovementRow
                 movement={row.movement}
-                symbol={symbol}
+                currency={currency}
+                symbols={symbols}
                 onEdit={onEdit}
                 onDelete={onDelete}
               />
@@ -65,7 +66,8 @@ export default function MovementList({ movements, symbol, onEdit, onDelete }) {
   );
 }
 
-function MovementRow({ movement, symbol, onEdit, onDelete }) {
+function MovementRow({ movement, currency, symbols, onEdit, onDelete }) {
+  const symbol = symbols[currency];
   const isIncome = movement.movement_type === "income";
   const Icon = isIncome ? TrendingUp : TrendingDown;
   const detail = `${movement.payment_method.name} · ${movement.created_by.full_name}`;
@@ -91,13 +93,25 @@ function MovementRow({ movement, symbol, onEdit, onDelete }) {
 
       {/* En móvil los botones van bajo el monto; desde 640 px, a su lado. */}
       <div className="flex flex-col items-end sm:flex-row sm:items-center sm:gap-2">
-        {/* El signo acompaña al color: + ingreso, − gasto. */}
-        <p
-          className={`font-semibold whitespace-nowrap ${isIncome ? "text-accent-strong" : ""}`}
-        >
-          <span className="sr-only">{isIncome ? "Ingreso de " : "Gasto de "}</span>
-          {formatMoney(movement.amount, symbol, isIncome ? "+" : "−")}
-        </p>
+        <div className="text-right">
+          {/* El signo acompaña al color: + ingreso, − gasto. */}
+          <p className={`font-semibold whitespace-nowrap ${isIncome ? "text-accent-strong" : ""}`}>
+            <span className="sr-only">{isIncome ? "Ingreso de " : "Gasto de "}</span>
+            {formatMoney(movement.amount, symbol, isIncome ? "+" : "−")}
+          </p>
+          {/* Se recuerda lo que se escribió si fue en otra moneda, o si al pasar por
+              el dólar (guardado con dos decimales) el monto ya no coincide. */}
+          {(movement.original_currency !== currency ||
+            movement.original_amount !== movement.amount) && (
+            <p className="text-xs whitespace-nowrap text-muted-foreground">
+              Anotado:{" "}
+              {formatMoney(
+                movement.original_amount,
+                symbols[movement.original_currency] ?? movement.original_currency,
+              )}
+            </p>
+          )}
+        </div>
         {movement.can_edit && (
           <div className="flex justify-end">
             <IconButton

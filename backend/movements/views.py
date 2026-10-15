@@ -9,19 +9,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import CanEditMovements, IsFamilyMember
-from catalogs.models import MovementType
+from catalogs.models import Currency, MovementType
+from rates.services import NO_RATE_MESSAGE, rate_data, today_rate
 
 from .models import Movement
 from .serializers import MovementFilterSerializer, MovementSerializer, MovementWriteSerializer
 
 
-def month_totals(movements):
-    """Suma de ingresos, suma de gastos y su diferencia."""
+def month_totals(movements, convert):
+    """Suma de ingresos, suma de gastos y su diferencia, en la moneda que se ve.
+
+    Se suma en USD y se convierte cada total, para no acumular redondeos.
+    """
     rows = movements.values("category__movement_type__code").annotate(total=Sum("amount"))
     by_type = {row["category__movement_type__code"]: row["total"] for row in rows}
     income = by_type.get(MovementType.INCOME, Decimal("0.00"))
     expense = by_type.get(MovementType.EXPENSE, Decimal("0.00"))
     # Como texto, igual que los montos de cada movimiento, para no perder decimales.
+    income, expense = convert(income), convert(expense)
+    # El balance se resta ya convertido para que en pantalla cuadre al céntimo.
     return {
         "income": str(income),
         "expense": str(expense),
@@ -45,13 +51,23 @@ class MovementListView(APIView):
         filters.is_valid(raise_exception=True)
         month = filters.validated_data.get("month") or timezone.localdate()
 
+        # Siempre la tasa de hoy, también para los meses pasados (spec 005).
+        rate = today_rate()
+        currency = filters.validated_data.get("currency") or Currency.objects.get(is_base=True)
+        if not currency.is_base and currency.code not in rate.bs_per_unit:
+            return Response({"currency": [NO_RATE_MESSAGE]}, status=status.HTTP_400_BAD_REQUEST)
+
+        def convert(amount):
+            """De USD a la moneda que se está viendo."""
+            return amount if currency.is_base else rate.from_usd(amount, currency.code)
+
         in_month = Movement.objects.filter(
             family=request.user.family, date__year=month.year, date__month=month.month
         )
 
         # Los totales son los del mes completo: no dependen de los filtros.
         movements = in_month.select_related(
-            "category__movement_type", "payment_method", "created_by"
+            "category__movement_type", "payment_method", "created_by", "original_currency"
         )
         if "type" in filters.validated_data:
             movements = movements.filter(category__movement_type=filters.validated_data["type"])
@@ -61,9 +77,11 @@ class MovementListView(APIView):
         return Response(
             {
                 "month": month.strftime("%Y-%m"),
-                "totals": month_totals(in_month),
+                "currency": currency.code,
+                "rate": rate_data(rate),
+                "totals": month_totals(in_month, convert),
                 "movements": MovementSerializer(
-                    movements, many=True, context={"user": request.user}
+                    movements, many=True, context={"user": request.user, "convert": convert}
                 ).data,
             }
         )
