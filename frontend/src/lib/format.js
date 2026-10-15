@@ -20,6 +20,16 @@ export function formatMoney(amount, symbol, sign = "") {
   return `${prefix}${symbol}${space}${numberFormat.format(Math.abs(value))}`;
 }
 
+const percentFormat = new Intl.NumberFormat("es-VE", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+// "35.5" -> "35,5 %". El espacio es irrompible, como en los montos.
+export function formatPercent(value) {
+  return `${percentFormat.format(Number(value))} %`;
+}
+
 function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -50,6 +60,16 @@ export function formatWeekday(dateText) {
 // "2026-10" -> "Octubre de 2026"
 export function formatMonth(monthText) {
   return capitalize(monthFormat.format(toDate(monthText)));
+}
+
+// "2026-10" -> ["2026-10-01", ..., "2026-10-31"]
+export function daysOfMonth(monthText) {
+  const date = toDate(monthText);
+  const count = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return Array.from(
+    { length: count },
+    (_, index) => `${monthText}-${String(index + 1).padStart(2, "0")}`,
+  );
 }
 
 export function today() {

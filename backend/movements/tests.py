@@ -79,18 +79,33 @@ class BaseTestCase(TestCase):
         data.update(changes)
         return data
 
-    def make_movement(self, category="Alimentación", amount="10.00", user=None, date=None):
+    def make_movement(
+        self, category="Alimentación", amount="10.00", user=None, date=None, method="Efectivo"
+    ):
         user = user or self.admin
         return Movement.objects.create(
             family=user.family,
             category=self.category(category, user.family),
-            payment_method=self.payment_method("Efectivo", user.family),
+            payment_method=self.payment_method(method, user.family),
             amount=Decimal(amount),
             original_amount=Decimal(amount),
             original_currency=Currency.objects.get(code="USD"),
             date=date or self.today,
             created_by=user,
         )
+
+    def set_rate(self, usd, eur):
+        """Guarda la tasa de hoy como leída del BCV: así no hace falta consultarlo."""
+        for code, value in {"USD": usd, "EUR": eur}.items():
+            ExchangeRate.objects.update_or_create(
+                currency=Currency.objects.get(code=code),
+                date=self.today,
+                defaults={
+                    "bs_per_unit": Decimal(value),
+                    "source": ExchangeRate.BCV,
+                    "fetched_at": timezone.now(),
+                },
+            )
 
 
 class CreateTests(BaseTestCase):
@@ -371,19 +386,6 @@ class CurrencyTests(BaseTestCase):
         super().setUp()
         self.set_rate("400", "440")
 
-    def set_rate(self, usd, eur):
-        """Guarda la tasa de hoy como leída del BCV: así no hace falta consultarlo."""
-        for code, value in {"USD": usd, "EUR": eur}.items():
-            ExchangeRate.objects.update_or_create(
-                currency=Currency.objects.get(code=code),
-                date=self.today,
-                defaults={
-                    "bs_per_unit": Decimal(value),
-                    "source": ExchangeRate.BCV,
-                    "fetched_at": timezone.now(),
-                },
-            )
-
     def create(self, **changes):
         return self.client.post("/api/movements/", self.payload(**changes))
 
@@ -510,6 +512,140 @@ class CurrencyTests(BaseTestCase):
         data = self.client.get("/api/movements/?currency=VES").json()
 
         self.assertEqual(data["rate"]["status"], "outdated")
+
+
+class SummaryTests(BaseTestCase):
+    """El resumen del dashboard (spec 006). Marzo de 2025, gastos por 901,30 $."""
+
+    URL = "/api/movements/summary/?month=2025-03"
+
+    def setUp(self):
+        super().setUp()
+        self.set_rate("400", "440")
+        def march(day):
+            return datetime.date(2025, 3, day)
+
+        self.make_movement("Salario", "1200.00", date=march(1))
+        self.make_movement("Transporte", "5.00", date=march(2))
+        self.make_movement("Entretenimiento", "1.00", date=march(3))
+        self.make_movement("Vivienda", "800.00", date=march(5), method="Transferencia")
+        self.make_movement("Alimentación", "45.30", date=march(12))
+        self.make_movement("Alimentación", "30.00", date=march(12), method="Pago móvil")
+        self.make_movement("Salud", "20.00", date=march(20))
+        self.make_movement("Salud", "99.00", date=datetime.date(2025, 2, 28))
+        self.make_movement("Alimentación", "999.00", user=self.outsider, date=march(10))
+        # Una categoría desactivada sigue contando: el dinero se gastó igual.
+        Category.objects.filter(family=self.family, name="Salud").update(is_active=False)
+
+    def summary(self, url=URL, user=None):
+        response = self.client_for(user or self.viewer).get(url)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_any_member_gets_the_summary_of_the_month(self):
+        data = self.summary()
+
+        self.assertEqual(data["month"], "2025-03")
+        self.assertEqual(data["currency"], "USD")
+        self.assertEqual(
+            data["totals"], {"income": "1200.00", "expense": "901.30", "balance": "298.70"}
+        )
+
+    def test_without_month_it_is_the_current_month(self):
+        data = self.summary("/api/movements/summary/")
+
+        self.assertEqual(data["month"], self.today.strftime("%Y-%m"))
+        self.assertEqual(data["by_category"], [])
+        self.assertEqual(data["top_expenses"], [])
+
+    def test_totals_match_the_movement_list(self):
+        for currency in ["USD", "VES", "EUR"]:
+            query = f"?month=2025-03&currency={currency}"
+            listed = self.client.get(f"/api/movements/{query}").json()
+            summary = self.summary(f"/api/movements/summary/{query}")
+            self.assertEqual(summary["totals"], listed["totals"])
+
+    def test_expenses_by_category_from_biggest_to_smallest(self):
+        rows = self.summary()["by_category"]
+
+        self.assertEqual(
+            [(row["name"], row["amount"], row["percent"], row["count"]) for row in rows],
+            [
+                ("Vivienda", "800.00", "88.8", 1),
+                ("Alimentación", "75.30", "8.4", 2),
+                ("Salud", "20.00", "2.2", 1),  # desactivada
+                ("Transporte", "5.00", "0.6", 1),
+                ("Entretenimiento", "1.00", "0.1", 1),
+            ],
+        )
+        self.assertEqual(rows[0]["id"], self.category("Vivienda").id)
+
+    def test_expenses_by_payment_method(self):
+        rows = self.summary()["by_payment_method"]
+
+        self.assertEqual(
+            [(row["name"], row["amount"], row["count"]) for row in rows],
+            [("Transferencia", "800.00", 1), ("Efectivo", "71.30", 4), ("Pago móvil", "30.00", 1)],
+        )
+        self.assertEqual(sum(Decimal(row["amount"]) for row in rows), Decimal("901.30"))
+
+    def test_expenses_by_day_only_has_days_with_expenses(self):
+        rows = self.summary()["by_day"]
+
+        self.assertEqual(
+            rows,
+            [
+                {"date": "2025-03-02", "amount": "5.00", "count": 1},
+                {"date": "2025-03-03", "amount": "1.00", "count": 1},
+                {"date": "2025-03-05", "amount": "800.00", "count": 1},
+                {"date": "2025-03-12", "amount": "75.30", "count": 2},
+                {"date": "2025-03-20", "amount": "20.00", "count": 1},
+            ],
+        )
+
+    def test_top_expenses_are_the_five_biggest_and_never_income(self):
+        rows = self.summary()["top_expenses"]
+
+        self.assertEqual(
+            [row["amount"] for row in rows], ["800.00", "45.30", "30.00", "20.00", "5.00"]
+        )
+        self.assertEqual(rows[0]["category"]["name"], "Vivienda")
+
+    def test_bolivars_use_todays_rate_and_keep_the_percentages(self):
+        in_dollars = self.summary()
+        in_bolivars = self.summary(f"{self.URL}&currency=VES")
+
+        self.assertEqual(in_bolivars["currency"], "VES")
+        self.assertEqual(in_bolivars["by_category"][0]["amount"], "320000.00")
+        self.assertEqual(in_bolivars["top_expenses"][1]["amount"], "18120.00")
+        self.assertEqual(in_bolivars["by_day"][0]["amount"], "2000.00")
+        for key in ["by_category", "by_payment_method"]:
+            self.assertEqual(
+                [row["percent"] for row in in_bolivars[key]],
+                [row["percent"] for row in in_dollars[key]],
+            )
+
+    def test_without_any_rate_only_dollars_can_be_used(self):
+        ExchangeRate.objects.all().delete()
+
+        response = self.client.get(f"{self.URL}&currency=VES")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("currency", response.json())
+
+    def test_bad_month_or_currency_is_rejected(self):
+        for query in ["month=marzo", "month=2025-13", "currency=XXX"]:
+            response = self.client.get(f"/api/movements/summary/?{query}")
+            self.assertEqual(response.status_code, 400, query)
+
+    def test_never_includes_another_family(self):
+        data = self.summary(user=self.outsider)
+
+        self.assertEqual(data["totals"]["expense"], "999.00")
+        self.assertEqual([row["name"] for row in data["by_category"]], ["Alimentación"])
+
+    def test_needs_a_session(self):
+        self.assertEqual(APIClient().get(self.URL).status_code, 401)
 
 
 @override_settings(DEBUG=True)  # seed_demo se niega a funcionar sin DEBUG

@@ -59,6 +59,10 @@ export const shake = {
 // Respuesta al pulsar un botón.
 export const press = { scale: 0.97, transition: { duration: duration.fast } };
 
+// Retraso de cada elemento de una lista que entra uno detrás de otro, con tope
+// para que una lista larga no haga esperar.
+export const staggerDelay = (index) => Math.min(index, 8) * 0.03;
+
 // Renglón de una lista que cambia: el nuevo aparece y el borrado sale hacia un lado.
 // Se usa como `variants`, con custom={posición} para que entren uno detrás de otro
 // (con tope, para que una lista larga no haga esperar).
@@ -67,7 +71,7 @@ export const listItem = {
   animate: (index = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { duration: duration.slow, ease, delay: Math.min(index, 8) * 0.03 },
+    transition: { duration: duration.slow, ease, delay: staggerDelay(index) },
   }),
   exit: { opacity: 0, x: -16, transition: { duration: duration.fast, ease } },
 };

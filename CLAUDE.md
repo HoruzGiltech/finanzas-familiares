@@ -39,7 +39,7 @@ Nada se programa sin una spec aprobada. El ciclo es siempre el mismo:
 | Frontend | React + Vite, React Router, Tailwind CSS, Motion (animaciones) |
 | Backend | Django + Django REST Framework |
 | Base de datos | PostgreSQL (en Docker Compose durante el desarrollo, puerto 5434; nunca 5432 ni 5433) |
-| Gráficos | Recharts (a confirmar en la spec 006) |
+| Gráficos | HTML + Tailwind + Motion, sin librería (spec 006; se revisa en la 007) |
 
 Estructura del repositorio:
 
@@ -176,7 +176,7 @@ solo esas variables, nunca colores sueltos.
 | 003 | Catálogos parametrizados | Implementada |
 | 004 | Registro de ingresos y gastos | Implementada |
 | 005 | Tasas BCV y vista en USD, bolívares y euros | Implementada |
-| 006 | Dashboard interactivo | Pendiente |
+| 006 | Dashboard interactivo | Implementada |
 | 007 | Comparación contra meses anteriores | Pendiente |
 | 008 | Exportación a CSV y dashboard a PDF | Pendiente |
 

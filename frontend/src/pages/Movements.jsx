@@ -1,12 +1,14 @@
-import { Plus, Scale, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { Plus, Scale, TrendingDown, TrendingUp, Wallet, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useSearchParams } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
 import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
+import CurrencyPicker from "../components/CurrencyPicker.jsx";
 import Modal from "../components/Modal.jsx";
 import MonthPicker from "../components/MonthPicker.jsx";
 import MovementForm from "../components/MovementForm.jsx";
@@ -14,59 +16,37 @@ import MovementList from "../components/MovementList.jsx";
 import RateInfo from "../components/RateInfo.jsx";
 import SegmentedControl from "../components/SegmentedControl.jsx";
 import Skeleton from "../components/Skeleton.jsx";
+import TotalCard from "../components/TotalCard.jsx";
 import { apiDelete, apiGet, readErrors } from "../lib/api.js";
 import { currentMonth, formatDay, formatMoney } from "../lib/format.js";
-import { fadeIn, slideUp, staggerList } from "../lib/motion.js";
-import { canUse } from "../lib/rates.js";
+import { BASE, currencySymbols, saveCurrency, savedCurrency } from "../lib/currency.js";
+import { fadeIn, staggerList } from "../lib/motion.js";
 
 const ALL = "all";
-const BASE = "USD";
-const CURRENCY_KEY = "movements-currency";
 
-// La moneda elegida se recuerda en este dispositivo. localStorage puede fallar
-// (navegación privada, almacenamiento bloqueado): entonces, dólares.
-function savedCurrency() {
-  try {
-    return localStorage.getItem(CURRENCY_KEY) || BASE;
-  } catch {
-    return BASE;
-  }
-}
-
-function saveCurrency(code) {
-  try {
-    localStorage.setItem(CURRENCY_KEY, code);
-  } catch {
-    // Sin almacenamiento solo se pierde el recuerdo; la pantalla sigue igual.
-  }
-}
-
-// En el móvil cada total es una fila (etiqueta a la izquierda, cifra a la
-// derecha) para que quepan cifras largas en bolívares; desde 640 px, tarjetas.
-function TotalCard({ icon: Icon, label, value, tone = "" }) {
-  return (
-    <motion.div variants={slideUp}>
-      <Card className="flex h-full items-center justify-between gap-3 px-4 py-3 sm:block sm:p-4">
-        <p className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Icon aria-hidden="true" className={`h-4 w-4 ${tone}`} />
-          {label}
-        </p>
-        <p className={`text-lg font-semibold whitespace-nowrap sm:mt-1 ${tone}`}>{value}</p>
-      </Card>
-    </motion.div>
-  );
+// El dashboard abre esta pantalla con ?mes=2026-10&categoria=7 (spec 006).
+function monthFromUrl(text) {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(text ?? "") && text <= currentMonth()
+    ? text
+    : currentMonth();
 }
 
 export default function Movements() {
   const { user } = useAuth();
   const canAdd = user.role !== "viewer";
 
-  const [month, setMonth] = useState(currentMonth());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [month, setMonth] = useState(() => monthFromUrl(searchParams.get("mes")));
+  // Filtro por categoría: solo desde el dashboard, y se quita con su etiqueta.
+  const categoryParam = searchParams.get("categoria");
+  const categoryId = /^\d+$/.test(categoryParam ?? "") ? Number(categoryParam) : null;
   const [filter, setFilter] = useState(ALL);
   const [currency, setCurrency] = useState(savedCurrency);
   const [catalogs, setCatalogs] = useState(null);
   const [data, setData] = useState(null); // null = cargando el mes
   const [loadError, setLoadError] = useState("");
+  // Aparte: si falla el catálogo, que una respuesta buena del mes no borre el aviso.
+  const [catalogError, setCatalogError] = useState("");
   const [reloads, setReloads] = useState(0); // sube para volver a pedir el mes
 
   const [formOpen, setFormOpen] = useState(false);
@@ -82,16 +62,17 @@ export default function Movements() {
         if (ok) {
           setCatalogs(body);
         } else {
-          setLoadError(readErrors(body).general || "No se pudieron cargar las listas.");
+          setCatalogError(readErrors(body).general || "No se pudieron cargar las listas.");
         }
       })
-      .catch((err) => setLoadError(err.message));
+      .catch((err) => setCatalogError(err.message));
   }, []);
 
   useEffect(() => {
     // Si se cambia de mes antes de que llegue la respuesta, la vieja se ignora.
     let ignore = false;
-    apiGet(`/movements/?month=${month}&currency=${currency}`)
+    const category = categoryId ? `&category=${categoryId}` : "";
+    apiGet(`/movements/?month=${month}&currency=${currency}${category}`)
       .then(({ ok, data: body }) => {
         if (ignore) return;
         if (ok) {
@@ -110,7 +91,7 @@ export default function Movements() {
     return () => {
       ignore = true;
     };
-  }, [month, currency, reloads]);
+  }, [month, currency, categoryId, reloads]);
 
   function changeMonth(newMonth) {
     setData(null);
@@ -123,6 +104,11 @@ export default function Movements() {
     saveCurrency(code);
   }
 
+  function clearCategory() {
+    setData(null);
+    setSearchParams({}, { replace: true });
+  }
+
   function openForm(movement = null) {
     setEditing(movement);
     setFormOpen(true);
@@ -133,6 +119,9 @@ export default function Movements() {
     // Que el filtro no esconda lo que se acaba de guardar.
     if (filter !== ALL && filter !== movement.movement_type) {
       setFilter(ALL);
+    }
+    if (categoryId && movement.category.id !== categoryId) {
+      clearCategory();
     }
     // Si se anotó en otro mes, vamos a ese mes para que se vea.
     const savedMonth = movement.date.slice(0, 7);
@@ -164,19 +153,16 @@ export default function Movements() {
     setDeleteBusy(false);
   }
 
-  // { USD: "$", VES: "Bs.", EUR: "€" }: los símbolos salen del catálogo.
-  const symbols = Object.fromEntries(
-    (catalogs?.currencies ?? []).map((item) => [item.code, item.symbol]),
-  );
+  const symbols = currencySymbols(catalogs);
   const ready = data && catalogs;
   const symbol = ready ? symbols[data.currency] : "";
-  const currencyOptions = (catalogs?.currencies ?? []).map((item) => ({
-    value: item.code,
-    label: item.symbol,
-    ariaLabel: item.name,
-    // Hasta saber la tasa no se desactiva nada; sin tasa, solo dólares.
-    disabled: Boolean(data) && !canUse(item.code, data.rate),
-  }));
+  // El nombre de la categoría filtrada: del catálogo o, si ya está desactivada
+  // (el catálogo de un no administrador no la trae), de sus movimientos.
+  const categoryName =
+    categoryId &&
+    (catalogs?.categories.find((item) => item.id === categoryId)?.name ??
+      data?.movements[0]?.category.name ??
+      "la elegida");
   const visible = ready
     ? data.movements.filter((movement) => filter === ALL || movement.movement_type === filter)
     : [];
@@ -209,9 +195,9 @@ export default function Movements() {
           <MonthPicker month={month} onChange={changeMonth} />
         </div>
         {catalogs && (
-          <SegmentedControl
-            label="Ver montos en"
-            options={currencyOptions}
+          <CurrencyPicker
+            currencies={catalogs.currencies}
+            rate={data?.rate}
             value={currency}
             onChange={changeCurrency}
             className="sm:w-56"
@@ -221,9 +207,9 @@ export default function Movements() {
 
       {ready && <RateInfo rate={data.rate} symbols={symbols} />}
 
-      {loadError && <Alert className="mt-4">{loadError}</Alert>}
+      {(catalogError || loadError) && <Alert className="mt-4">{catalogError || loadError}</Alert>}
 
-      {!ready && !loadError && (
+      {!ready && !catalogError && !loadError && (
         <div className="mt-4 space-y-4" aria-label="Cargando movimientos">
           <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
             <Skeleton className="h-13 sm:h-20" />
@@ -246,22 +232,41 @@ export default function Movements() {
             <TotalCard
               icon={TrendingUp}
               label="Ingresos"
-              value={formatMoney(data.totals.income, symbol, "+")}
+              value={data.totals.income}
+              format={(value) => formatMoney(value, symbol, "+")}
               tone="text-accent-strong"
             />
             <TotalCard
               icon={TrendingDown}
               label="Gastos"
-              value={formatMoney(data.totals.expense, symbol, "−")}
+              value={data.totals.expense}
+              format={(value) => formatMoney(value, symbol, "−")}
               tone="text-danger"
             />
             <TotalCard
               icon={Scale}
               label="Balance"
-              value={formatMoney(data.totals.balance, symbol)}
+              value={data.totals.balance}
+              format={(value) => formatMoney(value, symbol)}
               tone={Number(data.totals.balance) < 0 ? "text-danger" : ""}
             />
           </motion.div>
+
+          {categoryId && (
+            <div className="mt-4 flex">
+              <span className="inline-flex min-h-11 items-center gap-1 rounded-full bg-primary-soft pr-1 pl-4 text-sm font-semibold text-primary">
+                Categoría: {categoryName}
+                <button
+                  type="button"
+                  onClick={clearCategory}
+                  aria-label={`Quitar el filtro de ${categoryName}`}
+                  className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-full transition-colors duration-150 hover:bg-card"
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </span>
+            </div>
+          )}
 
           <SegmentedControl
             label="Filtrar por tipo"
@@ -274,7 +279,7 @@ export default function Movements() {
           {visible.length > 0 ? (
             // key: al cambiar de mes o de filtro la lista vuelve a entrar animada.
             <MovementList
-              key={`${month}-${filter}-${currency}`}
+              key={`${month}-${filter}-${currency}-${categoryId}`}
               movements={visible}
               currency={data.currency}
               symbols={symbols}

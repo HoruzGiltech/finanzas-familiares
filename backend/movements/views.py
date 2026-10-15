@@ -1,17 +1,20 @@
+import datetime
+from dataclasses import dataclass
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import QuerySet, Sum
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import CanEditMovements, IsFamilyMember
 from catalogs.models import Currency, MovementType
-from rates.services import NO_RATE_MESSAGE, rate_data, today_rate
+from rates.services import NO_RATE_MESSAGE, TodayRate, rate_data, today_rate
 
+from . import summary
 from .models import Movement
 from .serializers import MovementFilterSerializer, MovementSerializer, MovementWriteSerializer
 
@@ -35,6 +38,50 @@ def month_totals(movements, convert):
     }
 
 
+@dataclass
+class MonthView:
+    """El mes y la moneda que se están viendo, con la tasa de hoy."""
+
+    filters: dict
+    month: datetime.date
+    currency: Currency
+    rate: TodayRate
+    movements: QuerySet  # los del mes completo, de la familia
+
+    def convert(self, amount):
+        """De USD a la moneda que se está viendo."""
+        if self.currency.is_base:
+            return amount
+        return self.rate.from_usd(amount, self.currency.code)
+
+    def header(self):
+        """Lo que toda respuesta del mes repite: mes, moneda y tasa."""
+        return {
+            "month": self.month.strftime("%Y-%m"),
+            "currency": self.currency.code,
+            "rate": rate_data(self.rate),
+        }
+
+
+def read_view(request):
+    """Valida los filtros de la URL. Sin tasa, pedir otra moneda responde 400."""
+    filters = MovementFilterSerializer(data=request.query_params)
+    filters.is_valid(raise_exception=True)
+    data = filters.validated_data
+    month = data.get("month") or timezone.localdate()
+
+    # Siempre la tasa de hoy, también para los meses pasados (spec 005).
+    rate = today_rate()
+    currency = data.get("currency") or Currency.objects.get(is_base=True)
+    if not currency.is_base and currency.code not in rate.bs_per_unit:
+        raise ValidationError({"currency": [NO_RATE_MESSAGE]})
+
+    movements = Movement.objects.filter(
+        family=request.user.family, date__year=month.year, date__month=month.month
+    )
+    return MonthView(data, month, currency, rate, movements)
+
+
 def output(movement, request):
     return MovementSerializer(movement, context={"user": request.user}).data
 
@@ -47,41 +94,24 @@ class MovementListView(APIView):
         return [IsFamilyMember()]
 
     def get(self, request):
-        filters = MovementFilterSerializer(data=request.query_params)
-        filters.is_valid(raise_exception=True)
-        month = filters.validated_data.get("month") or timezone.localdate()
-
-        # Siempre la tasa de hoy, también para los meses pasados (spec 005).
-        rate = today_rate()
-        currency = filters.validated_data.get("currency") or Currency.objects.get(is_base=True)
-        if not currency.is_base and currency.code not in rate.bs_per_unit:
-            return Response({"currency": [NO_RATE_MESSAGE]}, status=status.HTTP_400_BAD_REQUEST)
-
-        def convert(amount):
-            """De USD a la moneda que se está viendo."""
-            return amount if currency.is_base else rate.from_usd(amount, currency.code)
-
-        in_month = Movement.objects.filter(
-            family=request.user.family, date__year=month.year, date__month=month.month
-        )
+        view = read_view(request)
+        filters = view.filters
 
         # Los totales son los del mes completo: no dependen de los filtros.
-        movements = in_month.select_related(
+        movements = view.movements.select_related(
             "category__movement_type", "payment_method", "created_by", "original_currency"
         )
-        if "type" in filters.validated_data:
-            movements = movements.filter(category__movement_type=filters.validated_data["type"])
-        if "category" in filters.validated_data:
-            movements = movements.filter(category_id=filters.validated_data["category"])
+        if "type" in filters:
+            movements = movements.filter(category__movement_type=filters["type"])
+        if "category" in filters:
+            movements = movements.filter(category_id=filters["category"])
 
         return Response(
             {
-                "month": month.strftime("%Y-%m"),
-                "currency": currency.code,
-                "rate": rate_data(rate),
-                "totals": month_totals(in_month, convert),
+                **view.header(),
+                "totals": month_totals(view.movements, view.convert),
                 "movements": MovementSerializer(
-                    movements, many=True, context={"user": request.user, "convert": convert}
+                    movements, many=True, context={"user": request.user, "convert": view.convert}
                 ).data,
             }
         )
@@ -95,6 +125,20 @@ class MovementListView(APIView):
             family=family, created_by=request.user, **serializer.validated_data
         )
         return Response(output(movement, request), status=status.HTTP_201_CREATED)
+
+
+class MovementSummaryView(APIView):
+    """Resumen del mes para el dashboard. Lo ve cualquier miembro (spec 006)."""
+
+    def get(self, request):
+        view = read_view(request)
+        return Response(
+            {
+                **view.header(),
+                "totals": month_totals(view.movements, view.convert),
+                **summary.expense_summary(view.movements, view.convert),
+            }
+        )
 
 
 class MovementDetailView(APIView):
