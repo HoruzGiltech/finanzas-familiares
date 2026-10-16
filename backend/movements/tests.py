@@ -648,6 +648,149 @@ class SummaryTests(BaseTestCase):
         self.assertEqual(APIClient().get(self.URL).status_code, 401)
 
 
+class ComparisonTests(BaseTestCase):
+    """La comparación con meses anteriores (spec 007), con marzo de 2025 como mes elegido.
+
+    Dic. 2024: Alimentación 100.  Ene.: Alimentación 60, Salud 30.
+    Feb.: Alimentación 80 (día 5), Transporte 10 (día 20).
+    Mar.: Alimentación 120 (día 10), Vivienda 50 (día 20).
+    Salario de 1000 cada mes, 1200 en marzo.
+    """
+
+    URL = "/api/movements/comparison/?month=2025-03"
+
+    def setUp(self):
+        super().setUp()
+        self.set_rate("400", "440")
+
+        def on(month, day):
+            return datetime.date(2025 if month < 12 else 2024, month, day)
+
+        for month in [12, 1, 2]:
+            self.make_movement("Salario", "1000.00", date=on(month, 1))
+        self.make_movement("Salario", "1200.00", date=on(3, 1))
+        self.make_movement("Alimentación", "100.00", date=on(12, 5))
+        self.make_movement("Alimentación", "60.00", date=on(1, 5))
+        self.make_movement("Salud", "30.00", date=on(1, 8))
+        self.make_movement("Alimentación", "80.00", date=on(2, 5))
+        self.make_movement("Transporte", "10.00", date=on(2, 20))
+        self.make_movement("Alimentación", "120.00", date=on(3, 10))
+        self.make_movement("Vivienda", "50.00", date=on(3, 20))
+        self.make_movement("Alimentación", "999.00", user=self.outsider, date=on(3, 10))
+
+    def compare(self, url=URL, user=None):
+        response = self.client_for(user or self.viewer).get(url)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    def test_closed_month_is_compared_with_the_whole_previous_month(self):
+        data = self.compare()
+
+        self.assertIsNone(data["partial_until"])
+        self.assertEqual(data["previous"]["month"], "2025-02")
+        self.assertEqual(
+            data["previous"]["totals"],
+            {"income": "1000.00", "expense": "90.00", "balance": "910.00"},
+        )
+        self.assertEqual(
+            data["previous"]["change"], {"income": "20.0", "expense": "88.9", "balance": "13.2"}
+        )
+
+    def test_month_in_progress_is_compared_until_the_same_day(self):
+        with mock.patch(
+            "django.utils.timezone.localdate", return_value=datetime.date(2025, 3, 15)
+        ):
+            data = self.compare()
+
+        self.assertEqual(data["partial_until"], 15)
+        # Hasta el 15: marzo 120 de gastos (Vivienda es del 20); febrero 80 (Transporte es del 20).
+        self.assertEqual(data["previous"]["totals"]["expense"], "80.00")
+        self.assertEqual(data["previous"]["change"]["expense"], "50.0")
+        self.assertTrue(data["history"][-1]["in_progress"])
+
+    def test_a_zero_base_has_no_percentage(self):
+        # Noviembre solo tiene un gasto: sus ingresos son 0 y no hay porcentaje.
+        self.make_movement("Salud", "5.00", date=datetime.date(2024, 11, 3))
+
+        change = self.compare("/api/movements/comparison/?month=2024-12")["previous"]["change"]
+
+        self.assertIsNone(change["income"])
+        self.assertEqual(change["expense"], "1900.0")  # de 5 a 100
+
+    def test_history_has_six_months_in_order(self):
+        rows = self.compare()["history"]
+
+        self.assertEqual(
+            [row["month"] for row in rows],
+            ["2024-10", "2024-11", "2024-12", "2025-01", "2025-02", "2025-03"],
+        )
+        self.assertEqual(
+            rows[0],
+            {
+                "month": "2024-10",
+                "income": "0.00",
+                "expense": "0.00",
+                "balance": "0.00",
+                "in_progress": False,
+            },
+        )
+        self.assertEqual(rows[-1]["expense"], "170.00")  # el mes completo
+        self.assertFalse(any(row["in_progress"] for row in rows))
+
+    def test_categories_against_the_three_month_average(self):
+        rows = self.compare()["categories"]
+
+        self.assertEqual(
+            [
+                (r["name"], r["amount"], r["average"], r["change"], r["change_percent"])
+                for r in rows
+            ],
+            [
+                ("Vivienda", "50.00", "0.00", "50.00", None),  # nueva
+                ("Alimentación", "120.00", "80.00", "40.00", "50.0"),
+                ("Transporte", "0.00", "3.33", "-3.33", "-100.0"),
+                ("Salud", "0.00", "10.00", "-10.00", "-100.0"),
+            ],
+        )
+
+    def test_only_months_with_movements_enter_the_average(self):
+        # Enero: antes solo hay diciembre con datos (noviembre y octubre vacíos).
+        rows = self.compare("/api/movements/comparison/?month=2025-01")["categories"]
+        food = next(r for r in rows if r["name"] == "Alimentación")
+        self.assertEqual(food["average"], "100.00")
+
+    def test_bolivars_convert_amounts_and_keep_percentages(self):
+        dollars = self.compare()
+        bolivars = self.compare(f"{self.URL}&currency=VES")
+
+        self.assertEqual(bolivars["previous"]["totals"]["expense"], "36000.00")
+        self.assertEqual(bolivars["categories"][1]["change"], "16000.00")
+        self.assertEqual(bolivars["history"][-1]["expense"], "68000.00")
+        self.assertEqual(bolivars["previous"]["change"], dollars["previous"]["change"])
+        self.assertEqual(
+            [r["change_percent"] for r in bolivars["categories"]],
+            [r["change_percent"] for r in dollars["categories"]],
+        )
+
+    def test_without_previous_months_there_is_nothing_to_compare(self):
+        data = self.compare("/api/movements/comparison/?month=2024-12")
+
+        self.assertIsNone(data["previous"])
+        self.assertEqual(data["categories"], [])
+
+    def test_never_includes_another_family(self):
+        data = self.compare(user=self.outsider)
+
+        self.assertIsNone(data["previous"])
+        self.assertEqual(data["history"][-1]["expense"], "999.00")
+
+    def test_bad_parameters_and_no_session(self):
+        for query in ["month=marzo", "currency=XXX"]:
+            response = self.client.get(f"/api/movements/comparison/?{query}")
+            self.assertEqual(response.status_code, 400, query)
+        self.assertEqual(APIClient().get(self.URL).status_code, 401)
+
+
 @override_settings(DEBUG=True)  # seed_demo se niega a funcionar sin DEBUG
 @mock.patch.dict(os.environ, {"DEMO_PASSWORD": PASSWORD})
 class SeedDemoTests(BaseTestCase):

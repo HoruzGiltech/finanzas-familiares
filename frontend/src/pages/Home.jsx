@@ -14,15 +14,18 @@ import { useAuth } from "../auth/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
 import BarList from "../components/BarList.jsx";
 import Card from "../components/Card.jsx";
+import CategoryChanges from "../components/CategoryChanges.jsx";
+import ChangeLine from "../components/ChangeLine.jsx";
 import CurrencyPicker from "../components/CurrencyPicker.jsx";
 import DailyChart from "../components/DailyChart.jsx";
 import MonthPicker from "../components/MonthPicker.jsx";
+import MonthlyChart from "../components/MonthlyChart.jsx";
 import RateInfo from "../components/RateInfo.jsx";
 import Skeleton from "../components/Skeleton.jsx";
 import TotalCard from "../components/TotalCard.jsx";
 import { apiGet, readErrors } from "../lib/api.js";
 import { BASE, currencySymbols, saveCurrency, savedCurrency } from "../lib/currency.js";
-import { currentMonth, formatDay, formatMoney } from "../lib/format.js";
+import { currentMonth, formatDay, formatMoney, formatMonthName } from "../lib/format.js";
 import { slideUp, staggerList } from "../lib/motion.js";
 
 const linkClass =
@@ -36,6 +39,12 @@ function spendingLine(totals) {
   if (income === 0) return null;
   if (expense > income) return "Gastaste más de lo que entró.";
   return `Gastaste el ${Math.round((expense / income) * 100)} % de lo que entró.`;
+}
+
+// Contra qué se compara: "septiembre" o, en el mes en curso, "1–15 de septiembre".
+function comparedWith(comparison) {
+  const name = formatMonthName(comparison.previous.month);
+  return comparison.partial_until ? `1–${comparison.partial_until} de ${name}` : name;
 }
 
 // Bloque del dashboard: tarjeta con título que entra con los demás.
@@ -91,7 +100,17 @@ function TopExpenses({ expenses, month, symbol }) {
 }
 
 function Dashboard({ data, symbol, canAdd }) {
-  const { totals, month } = data;
+  const { totals, month, comparison } = data;
+  // La línea de cambio bajo cada cifra (spec 007), si hay mes anterior.
+  const previous = comparison.previous;
+  const change = (key, goodWhenUp) =>
+    previous && (
+      <ChangeLine
+        percent={previous.change[key]}
+        goodWhenUp={goodWhenUp}
+        against={comparedWith(comparison)}
+      />
+    );
   const line = spendingLine(totals);
   const noMovements = Number(totals.income) === 0 && Number(totals.expense) === 0;
 
@@ -111,6 +130,7 @@ function Dashboard({ data, symbol, canAdd }) {
           value={totals.income}
           format={(value) => formatMoney(value, symbol, "+")}
           tone="text-accent-strong"
+          detail={change("income", true)}
         />
         <TotalCard
           icon={TrendingDown}
@@ -118,6 +138,7 @@ function Dashboard({ data, symbol, canAdd }) {
           value={totals.expense}
           format={(value) => formatMoney(value, symbol, "−")}
           tone="text-danger"
+          detail={change("expense", false)}
         />
         <TotalCard
           icon={Scale}
@@ -125,6 +146,7 @@ function Dashboard({ data, symbol, canAdd }) {
           value={totals.balance}
           format={(value) => formatMoney(value, symbol)}
           tone={Number(totals.balance) < 0 ? "text-danger" : ""}
+          detail={change("balance", true)}
         />
       </div>
       {line && (
@@ -157,8 +179,9 @@ function Dashboard({ data, symbol, canAdd }) {
           text="Cuando se anote un gasto, aquí verás en qué se va el dinero."
         />
       ) : (
-        // En el móvil: categorías, días, métodos de pago y gastos grandes.
-        // En escritorio, categorías y métodos de pago van lado a lado.
+        // En el móvil, uno debajo de otro en este orden. En escritorio, en dos
+        // columnas: categorías junto a "Qué cambió", los gráficos de columnas a
+        // todo el ancho, y métodos de pago junto a los gastos más grandes.
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Block title="Gastos por categoría">
             <BarList
@@ -168,13 +191,24 @@ function Dashboard({ data, symbol, canAdd }) {
               linkTo={(item) => `/movimientos?mes=${month}&categoria=${item.id}`}
             />
           </Block>
-          <Block className="sm:order-1 sm:col-span-2">
+          <Block title="Qué cambió">
+            <CategoryChanges
+              categories={comparison.categories}
+              partialUntil={comparison.partial_until}
+              month={month}
+              symbol={symbol}
+            />
+          </Block>
+          <Block className="sm:col-span-2">
+            <MonthlyChart history={comparison.history} symbol={symbol} />
+          </Block>
+          <Block className="sm:col-span-2">
             <DailyChart title="Gastos por día" month={month} days={data.by_day} symbol={symbol} />
           </Block>
           <Block title="Gastos por método de pago">
             <BarList items={data.by_payment_method} symbol={symbol} noun="métodos" />
           </Block>
-          <Block title="Los gastos más grandes" className="sm:order-2 sm:col-span-2">
+          <Block title="Los gastos más grandes">
             <TopExpenses expenses={data.top_expenses} month={month} symbol={symbol} />
           </Block>
         </div>
@@ -211,17 +245,20 @@ export default function Home() {
   useEffect(() => {
     // Si se cambia de mes antes de que llegue la respuesta, la vieja se ignora.
     let ignore = false;
-    apiGet(`/movements/summary/?month=${month}&currency=${currency}`)
-      .then(({ ok, data: body }) => {
+    // El resumen del mes (spec 006) y la comparación con los anteriores (spec 007).
+    const query = `?month=${month}&currency=${currency}`;
+    Promise.all([apiGet(`/movements/summary/${query}`), apiGet(`/movements/comparison/${query}`)])
+      .then(([summary, comparison]) => {
         if (ignore) return;
-        if (ok) {
-          setData(body);
+        const failed = [summary, comparison].find((response) => !response.ok);
+        if (!failed) {
+          setData({ ...summary.data, comparison: comparison.data });
           setLoadError("");
-        } else if (body?.currency && currency !== BASE) {
+        } else if (failed.data?.currency && currency !== BASE) {
           // Sin tasa del BCV (o moneda desactivada): se vuelve a dólares.
           changeCurrency(BASE);
         } else {
-          setLoadError(readErrors(body).general || "No se pudo cargar el resumen del mes.");
+          setLoadError(readErrors(failed.data).general || "No se pudo cargar el resumen del mes.");
         }
       })
       .catch((err) => {

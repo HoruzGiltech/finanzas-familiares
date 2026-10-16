@@ -14,7 +14,7 @@ from accounts.permissions import CanEditMovements, IsFamilyMember
 from catalogs.models import Currency, MovementType
 from rates.services import NO_RATE_MESSAGE, TodayRate, rate_data, today_rate
 
-from . import summary
+from . import comparison, summary
 from .models import Movement
 from .serializers import MovementFilterSerializer, MovementSerializer, MovementWriteSerializer
 
@@ -137,6 +137,23 @@ class MovementSummaryView(APIView):
                 **view.header(),
                 "totals": month_totals(view.movements, view.convert),
                 **summary.expense_summary(view.movements, view.convert),
+            }
+        )
+
+
+class MovementComparisonView(APIView):
+    """El mes frente a los anteriores. Lo ve cualquier miembro (spec 007)."""
+
+    def get(self, request):
+        view = read_view(request)
+        month = view.month.replace(day=1)
+        family_movements = Movement.objects.filter(family=request.user.family)
+        return Response(
+            {
+                **view.header(),
+                **comparison.comparison(
+                    family_movements, month, timezone.localdate(), view.convert
+                ),
             }
         )
 

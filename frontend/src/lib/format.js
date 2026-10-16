@@ -57,6 +57,19 @@ export function formatWeekday(dateText) {
   return weekdayFormat.format(toDate(dateText));
 }
 
+const monthNameFormat = new Intl.DateTimeFormat("es", { month: "long" });
+const shortMonthFormat = new Intl.DateTimeFormat("es", { month: "short" });
+
+// "2026-09" -> "septiembre"
+export function formatMonthName(monthText) {
+  return monthNameFormat.format(toDate(monthText));
+}
+
+// "2026-09" -> "sept" (sin el punto, para que quepa bajo una columna)
+export function formatShortMonth(monthText) {
+  return shortMonthFormat.format(toDate(monthText)).replace(".", "");
+}
+
 // "2026-10" -> "Octubre de 2026"
 export function formatMonth(monthText) {
   return capitalize(monthFormat.format(toDate(monthText)));
