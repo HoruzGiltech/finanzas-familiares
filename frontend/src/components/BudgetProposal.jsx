@@ -11,6 +11,8 @@ import Skeleton from "./Skeleton.jsx";
 const typed = (amount) => amount.replace(".", ",");
 
 // Una fila de la propuesta: casilla para incluirla y su monto (en USD), editable.
+// Con lista del supermercado (spec 011) el monto es el total de la lista y no
+// se cambia aquí, sino en la lista una vez creada.
 function Row({ row, onChange, usd, error }) {
   const id = `proposal-${row.key}`;
   return (
@@ -27,17 +29,23 @@ function Row({ row, onChange, usd, error }) {
           <span className="block font-medium break-words">{row.description}</span>
           <span className="block text-xs text-muted-foreground">{row.detail}</span>
         </label>
-        <label className="flex shrink-0 items-center gap-1">
-          <span className="text-sm text-muted-foreground">{usd}</span>
-          <span className="sr-only">Monto de {row.description} en dólares</span>
-          <input
-            inputMode="decimal"
-            value={row.amount}
-            disabled={!row.chosen}
-            onChange={(event) => onChange({ ...row, amount: event.target.value })}
-            className="min-h-11 w-24 rounded-lg border border-border bg-card px-2 text-right text-base tabular-nums disabled:opacity-50"
-          />
-        </label>
+        {row.list ? (
+          <span className="shrink-0 font-semibold whitespace-nowrap tabular-nums">
+            {formatMoney(row.amount.replace(",", "."), usd)}
+          </span>
+        ) : (
+          <label className="flex shrink-0 items-center gap-1">
+            <span className="text-sm text-muted-foreground">{usd}</span>
+            <span className="sr-only">Monto de {row.description} en dólares</span>
+            <input
+              inputMode="decimal"
+              value={row.amount}
+              disabled={!row.chosen}
+              onChange={(event) => onChange({ ...row, amount: event.target.value })}
+              className="min-h-11 w-24 rounded-lg border border-border bg-card px-2 text-right text-base tabular-nums disabled:opacity-50"
+            />
+          </label>
+        )}
       </div>
       {error && (
         <p role="alert" className="mt-1 text-sm text-danger">
@@ -74,10 +82,14 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
             category: item.category,
             amount: typed(item.proposed),
             chosen: true,
+            list: item.shopping_list.length > 0 ? item.shopping_list : null,
             detail:
-              item.spent === null
+              (item.spent === null
                 ? `${item.category.name} · Previsto ${formatMoney(item.planned, usdSymbol)}, quedó pendiente`
-                : `${item.category.name} · Previsto ${formatMoney(item.planned, usdSymbol)}, gastado ${formatMoney(item.spent, usdSymbol)}`,
+                : `${item.category.name} · Previsto ${formatMoney(item.planned, usdSymbol)}, gastado ${formatMoney(item.spent, usdSymbol)}`) +
+              (item.shopping_list.length > 0
+                ? ` · Lista de ${item.shopping_list.length} productos`
+                : ""),
           })),
           ...data.unplanned.map((row) => ({
             key: `unplanned-${row.category.id}`,
@@ -109,10 +121,19 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
     try {
       const { ok, data } = await apiPost("/budget/proposal/", {
         month,
+        // La lista se copia tal cual; su total será el monto de la partida.
         items: chosen.map((row) => ({
           description: row.description,
           category: row.category.id,
-          amount: amountForApi(row.amount),
+          ...(row.list
+            ? {
+                shopping_list: row.list.map(({ name, quantity, unit_price }) => ({
+                  name,
+                  quantity,
+                  unit_price,
+                })),
+              }
+            : { amount: amountForApi(row.amount) }),
         })),
       });
       if (ok) {

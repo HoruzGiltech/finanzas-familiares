@@ -46,6 +46,9 @@ class Category(models.Model):
     movement_type = models.ForeignKey(MovementType, on_delete=models.PROTECT)
     name = models.CharField(max_length=60)
     is_active = models.BooleanField(default=True)
+    # La categoría de gasto de la "Lista del supermercado" (spec 011). Una por
+    # familia; así su nombre no queda fijo en el código.
+    is_shopping_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

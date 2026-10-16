@@ -142,7 +142,9 @@ solo esas variables, nunca colores sueltos.
 - Presupuesto en la app `budget` (spec 010): `BudgetItem` en USD; realizada
   cuando tiene un movimiento enlazado (`SET_NULL`: si se borra, vuelve a
   pendiente). Mismo permiso que movimientos, pero cualquier editor toca
-  cualquier partida.
+  cualquier partida. Una partida puede tener lista del supermercado
+  (`ShoppingListItem`, spec 011): entonces su monto es el total de la lista y
+  solo lo recalcula el backend.
 
 ## Datos de ejemplo y pruebas en el navegador
 
@@ -186,6 +188,7 @@ solo esas variables, nunca colores sueltos.
 | 008 | Exportación a CSV y dashboard a PDF | Implementada |
 | 009 | Borrar categorías y métodos de pago sin movimientos | Implementada |
 | 010 | Presupuesto mensual | Implementada |
+| 011 | Presupuesto compacto y lista del supermercado | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 

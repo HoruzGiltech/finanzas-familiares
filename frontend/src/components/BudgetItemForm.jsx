@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { apiPatch, apiPost, readErrors } from "../lib/api.js";
+import { formatMoney } from "../lib/format.js";
 import { toOptions } from "../lib/options.js";
 import { canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
@@ -16,17 +17,22 @@ import Field from "./Field.jsx";
 // `item.amount` viene en la moneda que se está viendo (`viewCurrency`): al
 // corregir se muestra así, y solo se envía si se cambió, para no mover el USD
 // guardado por redondeos.
+//
+// Si la partida tiene lista del supermercado (spec 011), el monto sale de la
+// lista y aquí solo se enseña.
 export default function BudgetItemForm({
   item,
   month,
   catalogs,
   rate,
   viewCurrency,
+  symbol,
   onSaved,
   onCancel,
 }) {
   const startAmount = item ? item.amount.replace(".", ",") : "";
   const startCurrency = item && canUse(viewCurrency, rate) ? viewCurrency : "USD";
+  const fromList = item?.shopping_list.length > 0;
   const [description, setDescription] = useState(item?.description ?? "");
   const [category, setCategory] = useState(item?.category.id ?? "");
   const [amount, setAmount] = useState(startAmount);
@@ -48,7 +54,7 @@ export default function BudgetItemForm({
     const missing = {};
     if (!description.trim()) missing.description = "Escribe qué es, por ejemplo Alquiler.";
     if (!category) missing.category = "Elige una categoría.";
-    if (!amount.trim()) missing.amount = "Escribe el monto aproximado.";
+    if (!fromList && !amount.trim()) missing.amount = "Escribe el monto aproximado.";
     setFieldErrors(missing);
     setGeneralError("");
     if (Object.keys(missing).length > 0) return;
@@ -94,16 +100,23 @@ export default function BudgetItemForm({
         error={fieldErrors.category}
         onChange={(event) => setCategory(event.target.value)}
       />
-      <AmountField
-        label="Monto aproximado"
-        amount={amount}
-        currency={currency}
-        onAmountChange={setAmount}
-        onCurrencyChange={setCurrency}
-        currencies={catalogs.currencies}
-        rate={rate}
-        errors={fieldErrors}
-      />
+      {fromList ? (
+        <p className="text-sm text-muted-foreground">
+          Monto: <strong className="text-foreground">{formatMoney(item.amount, symbol)}</strong>.
+          Sale de la lista: para cambiarlo, cambia los productos.
+        </p>
+      ) : (
+        <AmountField
+          label="Monto aproximado"
+          amount={amount}
+          currency={currency}
+          onAmountChange={setAmount}
+          onCurrencyChange={setCurrency}
+          currencies={catalogs.currencies}
+          rate={rate}
+          errors={fieldErrors}
+        />
+      )}
 
       {generalError && <Alert>{generalError}</Alert>}
 

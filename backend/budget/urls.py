@@ -11,6 +11,11 @@ urlpatterns = [
         views.RealizeView.as_view(),
         name="budget-item-realize",
     ),
+    path(
+        "budget/items/<int:item_id>/list/",
+        views.ShoppingListView.as_view(),
+        name="budget-item-list",
+    ),
     path("budget/items/<int:item_id>/undo/", views.UndoView.as_view(), name="budget-item-undo"),
     path("budget/proposal/", views.ProposalView.as_view(), name="budget-proposal"),
 ]

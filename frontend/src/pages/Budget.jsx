@@ -1,14 +1,12 @@
 import {
-  ArrowDown,
-  ArrowUp,
+  ChevronRight,
+  Circle,
   CircleCheck,
   CircleDashed,
   ClipboardList,
-  Pencil,
   Plus,
+  ShoppingCart,
   Sparkles,
-  Trash2,
-  Undo2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
@@ -16,18 +14,19 @@ import { createPortal } from "react-dom";
 
 import { useAuth } from "../auth/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
+import BudgetItemDetail, { Difference } from "../components/BudgetItemDetail.jsx";
 import BudgetItemForm from "../components/BudgetItemForm.jsx";
 import BudgetProposal from "../components/BudgetProposal.jsx";
 import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
 import CurrencyPicker from "../components/CurrencyPicker.jsx";
-import IconButton from "../components/IconButton.jsx";
 import Modal from "../components/Modal.jsx";
 import MonthPicker from "../components/MonthPicker.jsx";
 import RateInfo from "../components/RateInfo.jsx";
 import RealizeForm from "../components/RealizeForm.jsx";
+import ShoppingListForm from "../components/ShoppingListForm.jsx";
 import Skeleton from "../components/Skeleton.jsx";
-import TotalCard from "../components/TotalCard.jsx";
+import StatNumber from "../components/StatNumber.jsx";
 import { apiDelete, apiGet, apiPost, readErrors } from "../lib/api.js";
 import { BASE, currencySymbols, saveCurrency, savedCurrency } from "../lib/currency.js";
 import {
@@ -37,123 +36,147 @@ import {
   formatMonthName,
   shiftMonth,
 } from "../lib/format.js";
-import { duration, ease, fadeIn, layoutTransition, listItem, staggerList } from "../lib/motion.js";
+import {
+  duration,
+  ease,
+  fadeIn,
+  layoutTransition,
+  listItem,
+  slideUp,
+  staggerList,
+} from "../lib/motion.js";
 
-// Partidas agrupadas por categoría, en el orden en que llegan (por nombre).
-function byCategory(items) {
-  const groups = [];
-  for (const item of items) {
-    const last = groups.at(-1);
-    if (last?.category.id === item.category.id) {
-      last.items.push(item);
-    } else {
-      groups.push({ category: item.category, items: [item] });
-    }
-  }
-  return groups;
-}
+// "2026-10-02" -> "02/10", para que el detalle quepa en una línea.
+const shortDate = (date) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
 
-// "↑ $10,00 más de lo previsto": icono y texto, no solo color.
-function Difference({ item, symbol }) {
-  const difference = Number(item.movement.amount) - Number(item.amount);
-  if (Math.abs(difference) < 0.005) return null;
-  const more = difference > 0;
-  const Icon = more ? ArrowUp : ArrowDown;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 ${more ? "text-danger" : "text-accent-strong"}`}
-    >
-      <Icon aria-hidden="true" className="h-3.5 w-3.5" />
-      {formatMoney(Math.abs(difference), symbol)} {more ? "más" : "menos"} de lo previsto
-    </span>
-  );
-}
-
-function ItemRow({ item, symbol, canEdit, onRealize, onEdit, onRemove, onUndo }) {
+// Un renglón por partida (spec 011): el círculo la marca como realizada; el
+// resto del renglón abre su detalle con las demás acciones.
+function ItemRow({ item, symbol, canEdit, onRealize, onOpen }) {
   const movement = item.movement;
+  const products = item.shopping_list.length;
+  const StatusIcon = movement ? CircleCheck : canEdit ? Circle : CircleDashed;
+  const statusClass = `h-5 w-5 ${movement ? "text-accent-strong" : "text-muted-foreground"}`;
+
   return (
-    <div className="py-3">
-      {/* Primera línea: qué es y cuánto se previó. */}
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="min-w-0 font-medium break-words">{item.description}</p>
-        <p className="shrink-0 font-semibold whitespace-nowrap tabular-nums">
-          <span className="sr-only">Previsto: </span>
-          {formatMoney(item.amount, symbol)}
-        </p>
-      </div>
-
-      {/* Segunda línea: estado y acciones. */}
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {movement ? (
-          // En el móvil el detalle ocupa su línea y los botones bajan a la siguiente.
-          <div className="min-w-0 basis-full text-sm sm:basis-0 sm:flex-1">
-            <p className="flex items-center gap-1 font-medium text-accent-strong">
-              <CircleCheck aria-hidden="true" className="h-4 w-4 shrink-0" />
-              Realizado: {formatMoney(movement.amount, symbol)}
-            </p>
-            <p className="text-muted-foreground">
-              {formatDay(movement.date)} · {movement.payment_method}
-            </p>
-            <p className="text-sm">
-              <Difference item={item} symbol={symbol} />
-            </p>
-          </div>
-        ) : (
-          <p className="flex shrink-0 items-center gap-1 text-sm whitespace-nowrap text-muted-foreground">
-            <CircleDashed aria-hidden="true" className="h-4 w-4 shrink-0" />
-            Pendiente
-          </p>
-        )}
-
-        {canEdit && (
-          <div className="ml-auto flex items-center gap-1">
-            {!movement && (
-              <Button variant="secondary" icon={CircleCheck} onClick={() => onRealize(item)}>
-                Realizado
-              </Button>
+    <div className="flex items-start">
+      {canEdit && !movement ? (
+        <button
+          type="button"
+          onClick={() => onRealize(item)}
+          aria-label={`Marcar ${item.description} como realizado`}
+          title="Marcar como realizado"
+          className="-ml-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors duration-150 hover:bg-accent-soft"
+        >
+          <StatusIcon aria-hidden="true" className={statusClass} />
+        </button>
+      ) : (
+        <span className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center">
+          <StatusIcon aria-hidden="true" className={statusClass} />
+          <span className="sr-only">{movement ? "Realizada:" : "Pendiente:"}</span>
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => onOpen(item)}
+        className="-mr-2 flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg py-1.5 pr-2 text-left transition-colors duration-150 hover:bg-muted/60"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="min-w-0 font-medium break-words">{item.description}</span>
+            <span className="shrink-0 font-semibold whitespace-nowrap tabular-nums">
+              <span className="sr-only">Previsto: </span>
+              {formatMoney(item.amount, symbol)}
+            </span>
+          </span>
+          {/* Sin grupos, la categoría va siempre en la línea de detalle. */}
+          <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            <span>{item.category.name}</span>
+            {products > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <ShoppingCart aria-hidden="true" className="h-3.5 w-3.5" />
+                {products} {products === 1 ? "producto" : "productos"}
+              </span>
             )}
-            {movement?.can_undo && (
-              <Button variant="secondary" icon={Undo2} onClick={() => onUndo(item)}>
-                Deshacer
-              </Button>
+            {movement && (
+              <span>
+                Real {formatMoney(movement.amount, symbol)} · {shortDate(movement.date)} ·{" "}
+                {movement.payment_method}
+              </span>
             )}
-            <IconButton
-              icon={Pencil}
-              label={`Corregir ${item.description}`}
-              onClick={() => onEdit(item)}
-            />
-            <IconButton
-              icon={Trash2}
-              danger
-              label={`Quitar ${item.description} del presupuesto`}
-              onClick={() => onRemove(item)}
-            />
-          </div>
-        )}
-      </div>
+            {movement && <Difference item={item} symbol={symbol} />}
+          </span>
+        </span>
+        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
     </div>
   );
 }
 
-// Cuánto del presupuesto ya se realizó: barra que crece con scaleX (solo transform).
-function Progress({ totals }) {
-  const planned = Number(totals.planned);
-  if (planned === 0) return null;
-  const share = Math.min(Number(totals.done) / planned, 1);
+// Una cifra del resumen: etiqueta pequeña y el monto que cuenta.
+function Figure({ icon: Icon, label, value, symbol, tone = "", className = "" }) {
   return (
-    <div className="mt-3">
-      <div className="h-2 rounded-full bg-muted" aria-hidden="true">
-        <motion.div
-          className="h-full origin-left rounded-full bg-accent"
-          initial={{ scaleX: 0 }}
-          animate={{ scaleX: share }}
-          transition={{ duration: duration.slow, ease }}
-        />
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Realizado el {Math.round(share * 100)}&nbsp;% de lo presupuestado.
+    <div className={`min-w-0 ${className}`}>
+      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Icon aria-hidden="true" className={`h-3.5 w-3.5 ${tone}`} />
+        {label}
+      </p>
+      <p className={`font-semibold whitespace-nowrap sm:text-lg ${tone}`}>
+        <StatNumber value={value} format={(number) => formatMoney(number, symbol)} />
       </p>
     </div>
+  );
+}
+
+// El resumen en una sola tarjeta (spec 011). En el móvil, lo presupuestado
+// ocupa su fila y realizado y pendiente van debajo, para que quepan las cifras
+// largas en bolívares; desde 640 px, las tres en una fila.
+function Summary({ totals, symbol }) {
+  const planned = Number(totals.planned);
+  const share = planned > 0 ? Math.min(Number(totals.done) / planned, 1) : 0;
+  return (
+    <motion.div variants={slideUp}>
+      <Card className="p-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+          <Figure
+            icon={ClipboardList}
+            label="Presupuestado"
+            value={totals.planned}
+            symbol={symbol}
+            className="col-span-2 sm:col-span-1"
+          />
+          <Figure
+            icon={CircleCheck}
+            label="Realizado"
+            value={totals.done}
+            symbol={symbol}
+            tone="text-accent-strong"
+          />
+          <Figure icon={CircleDashed} label="Pendiente" value={totals.pending} symbol={symbol} />
+        </div>
+        {planned > 0 && (
+          <div className="mt-3">
+            {/* La barra crece con scaleX (solo transform). */}
+            <div className="h-2 rounded-full bg-muted" aria-hidden="true">
+              <motion.div
+                className="h-full origin-left rounded-full bg-accent"
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: share }}
+                transition={{ duration: duration.slow, ease }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Realizado el {Math.round(share * 100)}&nbsp;% de lo presupuestado.
+            </p>
+          </div>
+        )}
+        {Number(totals.unplanned) > 0 && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Gastos fuera del presupuesto:{" "}
+            <strong className="text-foreground">{formatMoney(totals.unplanned, symbol)}</strong>
+          </p>
+        )}
+      </Card>
+    </motion.div>
   );
 }
 
@@ -171,6 +194,8 @@ export default function Budget() {
   const [reloads, setReloads] = useState(0); // sube para volver a pedir el mes
 
   const [form, setForm] = useState(null); // { item } al agregar (item null) o corregir
+  const [listOpen, setListOpen] = useState(false); // "Lista del supermercado"
+  const [detailId, setDetailId] = useState(null); // la partida cuyo detalle está abierto
   const [realizing, setRealizing] = useState(null);
   const [confirming, setConfirming] = useState(null); // { kind: "remove" | "undo", item }
   const [confirmError, setConfirmError] = useState("");
@@ -233,6 +258,12 @@ export default function Budget() {
     setConfirming({ kind, item });
   }
 
+  // Las acciones del detalle lo cierran y abren su propia ventana.
+  const fromDetail = (action) => (item) => {
+    setDetailId(null);
+    action(item);
+  };
+
   async function confirm() {
     const { kind, item } = confirming;
     setConfirmBusy(true);
@@ -257,21 +288,35 @@ export default function Budget() {
   const ready = data && catalogs;
   const symbol = ready ? symbols[data.currency] : "";
   const previousName = formatMonthName(shiftMonth(month, -1));
+  // El detalle se busca en los datos: así, al guardar la lista, se ve lo nuevo.
+  const detailItem = detailId && data?.items.find((item) => item.id === detailId);
 
   return (
     // pb-16 en móvil: sitio para el botón flotante, que no debe tapar la última partida.
     <section className={canEdit ? "pb-16 sm:pb-0" : ""}>
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold">Presupuesto</h1>
           <p className="mt-1 text-muted-foreground">
             Lo que piensan gastar en el mes y lo que ya se hizo.
           </p>
         </div>
         {canEdit && catalogs && (
-          <Button icon={Plus} className="max-sm:hidden" onClick={() => setForm({ item: null })}>
-            Agregar partida
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="secondary"
+              icon={ShoppingCart}
+              aria-label="Lista del supermercado"
+              onClick={() => setListOpen(true)}
+            >
+              {/* En el móvil, corto para que quepa junto al título. */}
+              <span className="sm:hidden">Lista</span>
+              <span className="max-sm:hidden">Lista del supermercado</span>
+            </Button>
+            <Button icon={Plus} className="max-sm:hidden" onClick={() => setForm({ item: null })}>
+              Agregar partida
+            </Button>
+          </div>
         )}
       </div>
 
@@ -297,11 +342,7 @@ export default function Budget() {
 
       {!ready && !catalogError && !loadError && (
         <div className="mt-4 space-y-3" aria-label="Cargando el presupuesto">
-          <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
-            <Skeleton className="h-13 sm:h-20" />
-            <Skeleton className="h-13 sm:h-20" />
-            <Skeleton className="h-13 sm:h-20" />
-          </div>
+          <Skeleton className="h-28" />
           <Skeleton className="h-64" />
         </div>
       )}
@@ -314,39 +355,10 @@ export default function Budget() {
           animate="visible"
           className="mt-4"
         >
-          <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
-            <TotalCard
-              icon={ClipboardList}
-              label="Presupuestado"
-              value={data.totals.planned}
-              format={(value) => formatMoney(value, symbol)}
-            />
-            <TotalCard
-              icon={CircleCheck}
-              label="Realizado"
-              value={data.totals.done}
-              format={(value) => formatMoney(value, symbol)}
-              tone="text-accent-strong"
-            />
-            <TotalCard
-              icon={CircleDashed}
-              label="Pendiente"
-              value={data.totals.pending}
-              format={(value) => formatMoney(value, symbol)}
-            />
-          </div>
-          <Progress totals={data.totals} />
-          {Number(data.totals.unplanned) > 0 && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Gastos fuera del presupuesto:{" "}
-              <strong className="text-foreground">
-                {formatMoney(data.totals.unplanned, symbol)}
-              </strong>
-            </p>
-          )}
+          <Summary totals={data.totals} symbol={symbol} />
 
           {data.items.length === 0 ? (
-            <motion.div variants={fadeIn} className="mt-4">
+            <motion.div variants={fadeIn} className="mt-3">
               <Card className="border-dashed text-center">
                 <ClipboardList
                   aria-hidden="true"
@@ -382,39 +394,37 @@ export default function Budget() {
               </Card>
             </motion.div>
           ) : (
-            <div className="mt-4 space-y-3">
-              {byCategory(data.items).map((group) => (
-                <Card key={group.category.id} className="p-4 sm:p-5">
-                  <h2 className="font-semibold">{group.category.name}</h2>
-                  <ul className="relative divide-y divide-border">
-                    <AnimatePresence mode="popLayout">
-                      {group.items.map((item, index) => (
-                        <motion.li
-                          key={item.id}
-                          layout
-                          variants={listItem}
-                          custom={index}
-                          initial="initial"
-                          animate="animate"
-                          exit="exit"
-                          transition={layoutTransition}
-                        >
-                          <ItemRow
-                            item={item}
-                            symbol={symbol}
-                            canEdit={canEdit}
-                            onRealize={setRealizing}
-                            onEdit={(chosen) => setForm({ item: chosen })}
-                            onRemove={(chosen) => ask("remove", chosen)}
-                            onUndo={(chosen) => ask("undo", chosen)}
-                          />
-                        </motion.li>
-                      ))}
-                    </AnimatePresence>
-                  </ul>
-                </Card>
-              ))}
-            </div>
+            <motion.div variants={slideUp} className="mt-3">
+              {/* Sin agrupar: de mayor a menor, como llegan de la API. */}
+              <Card className="px-4 py-2 sm:px-5">
+                <h2 className="sr-only">Partidas</h2>
+                <ul className="relative divide-y divide-border">
+                  <AnimatePresence mode="popLayout">
+                    {data.items.map((item, index) => (
+                      <motion.li
+                        key={item.id}
+                        layout
+                        variants={listItem}
+                        custom={index}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        transition={layoutTransition}
+                        className="py-1"
+                      >
+                        <ItemRow
+                          item={item}
+                          symbol={symbol}
+                          canEdit={canEdit}
+                          onRealize={setRealizing}
+                          onOpen={(chosen) => setDetailId(chosen.id)}
+                        />
+                      </motion.li>
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              </Card>
+            </motion.div>
           )}
         </motion.div>
       )}
@@ -437,6 +447,41 @@ export default function Budget() {
         )}
 
       <AnimatePresence>
+        {detailItem && (
+          <Modal title={detailItem.description} onClose={() => setDetailId(null)}>
+            <BudgetItemDetail
+              item={detailItem}
+              symbol={symbol}
+              usdSymbol={symbols[BASE]}
+              canEdit={canEdit}
+              onRealize={fromDetail(setRealizing)}
+              onEdit={fromDetail((chosen) => setForm({ item: chosen }))}
+              onRemove={fromDetail((chosen) => ask("remove", chosen))}
+              onUndo={fromDetail((chosen) => ask("undo", chosen))}
+              onListSaved={reload}
+            />
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {listOpen && (
+          <Modal title="Lista del supermercado" onClose={() => setListOpen(false)}>
+            <ShoppingListForm
+              month={month}
+              catalogs={catalogs}
+              usdSymbol={symbols[BASE]}
+              onSaved={() => {
+                setListOpen(false);
+                reload();
+              }}
+              onCancel={() => setListOpen(false)}
+            />
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {form && (
           <Modal
             title={form.item ? "Corregir partida" : "Agregar partida"}
@@ -448,6 +493,7 @@ export default function Budget() {
               catalogs={catalogs}
               rate={data?.rate}
               viewCurrency={currency}
+              symbol={symbol}
               onSaved={() => {
                 setForm(null);
                 reload();
@@ -512,6 +558,7 @@ export default function Budget() {
             ) : (
               <p>
                 Vas a quitar <strong>{confirming.item.description}</strong> del presupuesto.
+                {confirming.item.shopping_list.length > 0 && " Su lista se borra con ella."}
                 {confirming.item.movement && " Su gasto se queda en Movimientos."}
               </p>
             )}

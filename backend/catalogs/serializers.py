@@ -27,7 +27,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Category
-        fields = ["id", "name", "movement_type", "is_active"]
+        fields = ["id", "name", "movement_type", "is_active", "is_shopping_list"]
 
 
 class PaymentMethodSerializer(serializers.ModelSerializer):

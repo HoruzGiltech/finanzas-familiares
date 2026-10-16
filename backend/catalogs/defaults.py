@@ -19,6 +19,9 @@ DEFAULT_EXPENSE_CATEGORIES = [
     "Otros gastos",
 ]
 
+# La categoría de gasto de la lista del supermercado (spec 011).
+SHOPPING_LIST_CATEGORY = "Alimentación"
+
 DEFAULT_INCOME_CATEGORIES = [
     "Salario",
     "Negocio propio",
@@ -42,7 +45,12 @@ def create_default_catalogs(family):
     income = MovementType.objects.get(code=MovementType.INCOME)
 
     categories = [
-        Category(family=family, movement_type=expense, name=name)
+        Category(
+            family=family,
+            movement_type=expense,
+            name=name,
+            is_shopping_list=name == SHOPPING_LIST_CATEGORY,
+        )
         for name in DEFAULT_EXPENSE_CATEGORIES
     ] + [
         Category(family=family, movement_type=income, name=name)

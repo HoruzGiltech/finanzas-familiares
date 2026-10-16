@@ -15,12 +15,18 @@ from movements.models import Movement
 from movements.serializers import MovementWriteSerializer
 from movements.views import read_view
 
-from .models import BudgetItem
-from .serializers import BudgetItemWriteSerializer, ProposalSerializer
+from .models import BudgetItem, ShoppingListItem
+from .serializers import (
+    BudgetItemWriteSerializer,
+    ProposalSerializer,
+    ShoppingListSerializer,
+    list_amount,
+)
 
 ZERO = Decimal("0.00")
 ALREADY_DONE = "Esta partida ya está realizada."
 NOT_DONE = "Esta partida todavía no está realizada."
+LIST_LOCKED = "La lista de una partida realizada no se cambia: deshazla antes."
 
 
 def movement_data(movement, convert, user):
@@ -37,6 +43,38 @@ def movement_data(movement, convert, user):
     }
 
 
+def shopping_list_data(item):
+    """Los productos de la lista, en USD: así se escriben (spec 011)."""
+    return [
+        {
+            "id": line.id,
+            "name": line.name,
+            "quantity": str(line.quantity),
+            "unit_price": str(line.unit_price),
+            "total": str(line.total),
+        }
+        for line in item.shopping_list.all()
+    ]
+
+
+def save_shopping_list(item, lines):
+    """Reemplaza la lista de la partida por `lines`, en el orden en que llegan."""
+    item.shopping_list.all().delete()
+    ShoppingListItem.objects.bulk_create(
+        ShoppingListItem(budget_item=item, position=position, **line)
+        for position, line in enumerate(lines)
+    )
+
+
+def create_item(family, user, data):
+    """Crea una partida y, si la trae, su lista."""
+    lines = data.pop("shopping_list", None)
+    item = BudgetItem.objects.create(family=family, created_by=user, **data)
+    if lines:
+        save_shopping_list(item, lines)
+    return item
+
+
 def item_data(item, convert, user):
     """Lo que la API devuelve de una partida. Los montos, en la moneda que se ve."""
     return {
@@ -46,12 +84,16 @@ def item_data(item, convert, user):
         "category": {"id": item.category_id, "name": item.category.name},
         "amount": str(convert(item.amount)),
         "movement": movement_data(item.movement, convert, user) if item.is_done else None,
+        "shopping_list": shopping_list_data(item),
     }
 
 
 def items_of(family, month):
-    return BudgetItem.objects.filter(family=family, month=month).select_related(
-        "category", "movement__payment_method", "movement__original_currency"
+    return (
+        BudgetItem.objects.filter(family=family, month=month)
+        .select_related("category", "movement__payment_method", "movement__original_currency")
+        .prefetch_related("shopping_list")
+        .order_by("-amount", "description", "id")  # de mayor a menor (spec 011)
     )
 
 
@@ -104,9 +146,8 @@ class BudgetItemListView(APIView):
         family = request.user.family
         serializer = BudgetItemWriteSerializer(data=request.data, context={"family": family})
         serializer.is_valid(raise_exception=True)
-        item = BudgetItem.objects.create(
-            family=family, created_by=request.user, **serializer.validated_data
-        )
+        with transaction.atomic():
+            item = create_item(family, request.user, serializer.validated_data)
         return Response(item_data(item, base_convert, request.user), status=status.HTTP_201_CREATED)
 
 
@@ -121,9 +162,18 @@ class BudgetItemDetailView(APIView):
         )
         return get_object_or_404(related, pk=item_id, family=request.user.family)
 
+    @transaction.atomic
     def patch(self, request, item_id):
-        item = self.get_item(request, item_id)
-        data = {key: value for key, value in request.data.items() if key != "month"}
+        # select_for_update: que una lista guardada a la vez no descuadre el monto.
+        item = get_object_or_404(
+            BudgetItem.objects.select_for_update(), pk=item_id, family=request.user.family
+        )
+        # El mes no cambia; la lista se cambia con su propia ruta.
+        data = {
+            key: value
+            for key, value in request.data.items()
+            if key not in ("month", "shopping_list")
+        }
         serializer = BudgetItemWriteSerializer(
             item, data=data, partial=True, context={"family": request.user.family}
         )
@@ -137,6 +187,28 @@ class BudgetItemDetailView(APIView):
         # Si estaba realizada, su movimiento se queda: el gasto se hizo igual.
         self.get_item(request, item_id).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ShoppingListView(APIView):
+    """Reemplaza la lista de una partida y recalcula su monto (spec 011)."""
+
+    permission_classes = [CanEditMovements]
+
+    def put(self, request, item_id):
+        serializer = ShoppingListSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lines = serializer.validated_data["shopping_list"]
+        with transaction.atomic():
+            item = get_object_or_404(
+                BudgetItem.objects.select_for_update(), pk=item_id, family=request.user.family
+            )
+            if item.is_done:
+                raise ValidationError({"detail": [LIST_LOCKED]})
+            item.amount = list_amount(lines)
+            item.save()
+            save_shopping_list(item, lines)
+        item = items_of(request.user.family, item.month).get(pk=item.pk)
+        return Response(item_data(item, base_convert, request.user))
 
 
 class RealizeView(APIView):
@@ -198,6 +270,13 @@ class MonthParamSerializer(serializers.Serializer):
     month = serializers.DateField(input_formats=["%Y-%m"])
 
 
+def proposed_amount(item):
+    """Lo que realmente se gastó si se realizó; si no, lo previsto. Con lista, su total."""
+    if item.is_done and not item.shopping_list.all():
+        return item.movement.amount
+    return item.amount
+
+
 class ProposalView(APIView):
     """La propuesta del mes a partir del anterior (spec 010, sección 4). Todo en USD."""
 
@@ -213,10 +292,11 @@ class ProposalView(APIView):
             {
                 "description": item.description,
                 "category": {"id": item.category_id, "name": item.category.name},
-                # Lo que realmente se gastó si se realizó; si no, lo previsto.
-                "proposed": str(item.movement.amount if item.is_done else item.amount),
+                "proposed": str(proposed_amount(item)),
                 "planned": str(item.amount),
                 "spent": str(item.movement.amount) if item.is_done else None,
+                # La lista se copia; su total es el monto (spec 011, sección 3.5).
+                "shopping_list": shopping_list_data(item),
             }
             for item in items_of(family, previous)
         ]
@@ -268,10 +348,7 @@ class ProposalView(APIView):
             raise ValidationError({"items": errors})
 
         with transaction.atomic():
-            created = [
-                BudgetItem.objects.create(family=family, created_by=request.user, **data)
-                for data in valid
-            ]
+            created = [create_item(family, request.user, data) for data in valid]
         return Response(
             [item_data(item, base_convert, request.user) for item in created],
             status=status.HTTP_201_CREATED,
