@@ -76,6 +76,42 @@ export function today() {
   return toText(new Date());
 }
 
+// shiftDay("2026-10-01", -1) -> "2026-09-30"
+export function shiftDay(dateText, delta) {
+  const date = toDate(dateText);
+  date.setDate(date.getDate() + delta);
+  return toText(date);
+}
+
+// Fechas que escribe la persona: siempre dd/mm/aaaa, como se usa en Venezuela.
+// El campo de fecha del navegador sigue el idioma del navegador (en inglés,
+// mm/dd/aaaa) y no se puede cambiar; por eso es un campo de texto.
+
+// "2026-10-15" -> "15/10/2026"
+export function toTypedDate(dateText) {
+  const [year, month, day] = dateText.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+// Mientras se escribe pone las barras solas: "15102026" -> "15/10/2026".
+// Solo añade una barra cuando ya hay un número detrás, así borrar funciona normal.
+// Quien escribe la barra tras un solo número quiere decir 0: "1/" -> "01/".
+export function maskTypedDate(text) {
+  const padded = text.replace(/^(\d)\//, "0$1/").replace(/^(\d{2}\/)(\d)\//, "$10$2/");
+  const digits = padded.replace(/\D/g, "").slice(0, 8);
+  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)];
+  return parts.filter(Boolean).join("/");
+}
+
+// "15/10/2026" -> "2026-10-15", o null si no es una fecha que exista ("31/02/2026").
+export function parseTypedDate(text) {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const dateText = `${year}-${month}-${day}`;
+  return toText(toDate(dateText)) === dateText ? dateText : null;
+}
+
 export function currentMonth() {
   return today().slice(0, 7);
 }

@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { CalendarDays } from "lucide-react";
+import { useRef, useState } from "react";
 
 import { apiPatch, apiPost, readErrors } from "../lib/api.js";
-import { formatMoney, today } from "../lib/format.js";
+import {
+  formatMoney,
+  maskTypedDate,
+  parseTypedDate,
+  shiftDay,
+  toTypedDate,
+  today,
+} from "../lib/format.js";
 import { approxUsd, canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
 import Alert from "./Alert.jsx";
@@ -47,11 +55,13 @@ export default function MovementForm({
   );
   const [category, setCategory] = useState(movement?.category.id ?? "");
   const [paymentMethod, setPaymentMethod] = useState(movement?.payment_method.id ?? "");
-  const [date, setDate] = useState(movement?.date ?? today());
+  // La fecha se escribe dd/mm/aaaa; al enviarla se pasa a "2026-10-15".
+  const [date, setDate] = useState(toTypedDate(movement?.date ?? today()));
   const [description, setDescription] = useState(movement?.description ?? "");
   const [fieldErrors, setFieldErrors] = useState({});
   const [generalError, setGeneralError] = useState("");
   const [saving, setSaving] = useState(false);
+  const calendar = useRef(null); // el calendario oculto del navegador
 
   useFocusFirstError(fieldErrors);
 
@@ -89,6 +99,18 @@ export default function MovementForm({
     "Elige un método de pago",
   );
 
+  function openCalendar() {
+    try {
+      calendar.current.showPicker();
+    } catch {
+      // Navegadores antiguos sin showPicker: queda escribir la fecha a mano.
+      setFieldErrors({
+        ...fieldErrors,
+        date: "Este navegador no abre el calendario: escribe la fecha.",
+      });
+    }
+  }
+
   function changeType(newType) {
     setType(newType);
     setCategory(""); // las categorías de un tipo no valen para el otro
@@ -101,7 +123,14 @@ export default function MovementForm({
     if (!amount.trim()) missing.amount = "Escribe el monto.";
     if (!category) missing.category = "Elige una categoría.";
     if (!paymentMethod) missing.payment_method = "Elige un método de pago.";
-    if (!date) missing.date = "Elige la fecha.";
+    const dateText = parseTypedDate(date);
+    if (!date.trim()) {
+      missing.date = "Escribe la fecha.";
+    } else if (!dateText) {
+      missing.date = "Escribe una fecha válida, como 15/10/2026 (día/mes/año).";
+    } else if (dateText > today()) {
+      missing.date = "La fecha no puede ser futura.";
+    }
     setFieldErrors(missing);
     setGeneralError("");
     if (Object.keys(missing).length > 0) {
@@ -114,7 +143,7 @@ export default function MovementForm({
       // En Venezuela los decimales se escriben con coma; la API los espera con punto.
       amount: amount.trim().replace(",", "."),
       currency,
-      date,
+      date: dateText, // la API espera "2026-10-15"
       description: description.trim(),
     };
 
@@ -192,14 +221,63 @@ export default function MovementForm({
         error={fieldErrors.payment_method}
         onChange={(event) => setPaymentMethod(event.target.value)}
       />
-      <Field
-        label="Fecha"
-        type="date"
-        max={today()}
-        value={date}
-        error={fieldErrors.date}
-        onChange={(event) => setDate(event.target.value)}
-      />
+      <div>
+        <div className="flex items-start gap-2">
+          <Field
+            label="Fecha"
+            inputMode="numeric" // teclado numérico en el móvil; las barras se ponen solas
+            placeholder="dd/mm/aaaa"
+            hint="Día/mes/año, por ejemplo 15/10/2026."
+            autoComplete="off"
+            value={date}
+            error={fieldErrors.date}
+            onChange={(event) => setDate(maskTypedDate(event.target.value))}
+            className="min-w-0 flex-1"
+          />
+          {/* Para cualquier otro día: el calendario del navegador. Solo se usa para
+              elegir; lo elegido se escribe en el campo como dd/mm/aaaa. El campo
+              oculto va junto al botón para que el calendario se abra ahí.
+              mt-6: a la altura del campo, bajo la etiqueta "Fecha". */}
+          <div className="relative mt-6 shrink-0">
+            <Button
+              variant="secondary"
+              icon={CalendarDays}
+              onClick={openCalendar}
+              aria-label="Elegir la fecha en el calendario"
+              className="min-w-11"
+            >
+              {/* En móvil solo el icono, para que quepa junto al campo. */}
+              <span className="hidden sm:inline">Calendario</span>
+            </Button>
+            <input
+              ref={calendar}
+              type="date"
+              tabIndex={-1}
+              aria-hidden="true"
+              max={today()}
+              value={parseTypedDate(date) ?? ""}
+              onChange={(event) => event.target.value && setDate(toTypedDate(event.target.value))}
+              className="pointer-events-none absolute right-0 bottom-0 h-px w-px opacity-0"
+            />
+          </div>
+        </div>
+        <div className="mt-2 flex gap-2">
+          {[
+            ["Hoy", today()],
+            ["Ayer", shiftDay(today(), -1)],
+          ].map(([label, value]) => (
+            <Button
+              key={label}
+              variant="secondary"
+              aria-pressed={date === toTypedDate(value)}
+              onClick={() => setDate(toTypedDate(value))}
+              className="aria-pressed:border-primary aria-pressed:text-primary"
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
       <Field
         label="Descripción (opcional)"
         maxLength={200}

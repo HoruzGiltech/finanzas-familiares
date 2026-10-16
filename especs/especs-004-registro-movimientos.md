@@ -251,3 +251,18 @@ se crean, modifican ni borran.
 7. **"Contraseña" sale de la barra inferior del móvil** y queda como icono
    arriba, junto a "Cerrar sesión". Se decidió durante la implementación.
 8. **`seed_demo` carga movimientos de ejemplo** en la familia de prueba.
+
+## 7. Ajustes posteriores
+
+1. **Fecha en dd/mm/aaaa** (15 de octubre de 2026, pedido por el usuario). El
+   campo de fecha del navegador muestra el formato del idioma del navegador
+   (en inglés, mm/dd/aaaa) y eso confunde en Venezuela. Ahora es un campo de
+   texto `dd/mm/aaaa`:
+   - Teclado numérico en el móvil; las barras se ponen solas y "1/" se
+     convierte en "01/".
+   - Botones **Hoy** y **Ayer** debajo del campo.
+   - Botón de **calendario** junto al campo (en el móvil solo el icono), para
+     cualquier otro día. Abre el calendario del navegador; el día elegido se
+     escribe en el campo como dd/mm/aaaa.
+   - Una fecha que no existe (31/02/2026) o futura se avisa junto al campo
+     antes de enviar. La API sigue recibiendo y validando `2026-10-15`.
