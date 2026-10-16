@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   ChartNoAxesColumn,
+  ClipboardList,
   Scale,
   TrendingDown,
   TrendingUp,
@@ -227,8 +228,17 @@ export default function Home() {
   const [catalogs, setCatalogs] = useState(null);
   const [data, setData] = useState(null); // null = cargando el mes
   const [loadError, setLoadError] = useState("");
+  // Recordatorio del presupuesto (spec 010): el mes actual está vacío y el anterior no.
+  const [budgetPending, setBudgetPending] = useState(false);
   // Aparte: si falla el catálogo, que una respuesta buena del mes no borre el aviso.
   const [catalogError, setCatalogError] = useState("");
+
+  useEffect(() => {
+    if (!canAdd) return; // solo quien puede prepararlo
+    apiGet(`/budget/?month=${currentMonth()}`)
+      .then(({ ok, data: body }) => setBudgetPending(ok && body.can_propose))
+      .catch(() => {}); // es solo un recordatorio: si falla, no se muestra
+  }, [canAdd]);
 
   useEffect(() => {
     apiGet("/catalogs/")
@@ -295,6 +305,20 @@ export default function Home() {
           <ArrowRight aria-hidden="true" className="h-4 w-4" />
         </Link>
       </div>
+
+      {budgetPending && (
+        <Link
+          to="/presupuesto"
+          className="mt-4 flex min-h-11 items-center gap-3 rounded-xl border border-primary/20 bg-primary-soft px-4 py-3 text-sm transition-colors duration-150 hover:border-primary/40"
+        >
+          <ClipboardList aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
+          <span className="flex-1">
+            Ya es {formatMonthName(currentMonth())}:{" "}
+            <strong className="text-primary">prepara el presupuesto del mes</strong>
+          </span>
+          <ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+        </Link>
+      )}
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
         <div className="sm:flex-1">

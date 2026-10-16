@@ -1,5 +1,7 @@
+import { ChevronRight, Users } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import Alert from "../components/Alert.jsx";
 import Card from "../components/Card.jsx";
@@ -122,6 +124,16 @@ export default function Settings() {
       <p className="mt-1 text-muted-foreground">
         Prepara las listas que tu familia usará al registrar ingresos y gastos.
       </p>
+
+      {/* En el móvil Miembros no cabe en la barra de abajo (spec 010): se llega desde aquí. */}
+      <Link
+        to="/miembros"
+        className="mt-4 flex min-h-11 items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 font-medium transition-colors duration-150 hover:bg-muted sm:hidden"
+      >
+        <Users aria-hidden="true" className="h-5 w-5 text-primary" />
+        <span className="flex-1">Miembros de la familia</span>
+        <ChevronRight aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+      </Link>
 
       {loadError && <Alert className="mt-4">{loadError}</Alert>}
 

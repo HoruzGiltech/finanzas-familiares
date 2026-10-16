@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "catalogs",
     "movements",
     "rates",
+    "budget",
 ]
 
 MIDDLEWARE = [

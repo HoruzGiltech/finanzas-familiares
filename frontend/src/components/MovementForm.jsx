@@ -1,38 +1,16 @@
-import { CalendarDays } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { apiPatch, apiPost, readErrors } from "../lib/api.js";
-import {
-  formatMoney,
-  maskTypedDate,
-  parseTypedDate,
-  shiftDay,
-  toTypedDate,
-  today,
-} from "../lib/format.js";
-import { approxUsd, canUse } from "../lib/rates.js";
+import { toTypedDate, today } from "../lib/format.js";
+import { toOptions } from "../lib/options.js";
+import { canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
 import Alert from "./Alert.jsx";
+import AmountField, { amountForApi } from "./AmountField.jsx";
 import Button from "./Button.jsx";
+import DateField, { checkTypedDate } from "./DateField.jsx";
 import Field from "./Field.jsx";
-import { RateNotice } from "./RateInfo.jsx";
 import SegmentedControl from "./SegmentedControl.jsx";
-
-// Opciones de una lista desplegable. Si el movimiento que se corrige usa un
-// elemento ya desactivado (`current`), se añade para que pueda conservarlo.
-function toOptions(items, current, placeholder) {
-  const options = items.map((item) => ({ value: item.id, label: item.name }));
-  if (current && !items.some((item) => item.id === current.id)) {
-    options.push({ value: current.id, label: `${current.name} (desactivada)` });
-  }
-  return [{ value: "", label: placeholder }, ...options];
-}
-
-// "1500,5" -> 1500.5, o null si no es un número. Solo para el equivalente aproximado.
-function parseAmount(text) {
-  const value = Number(text.trim().replace(",", "."));
-  return text.trim() && Number.isFinite(value) && value > 0 ? value : null;
-}
 
 // Formulario para registrar un movimiento o corregir uno (`movement`).
 // Al guardar llama a onSaved con el movimiento que devuelve la API.
@@ -61,7 +39,6 @@ export default function MovementForm({
   const [fieldErrors, setFieldErrors] = useState({});
   const [generalError, setGeneralError] = useState("");
   const [saving, setSaving] = useState(false);
-  const calendar = useRef(null); // el calendario oculto del navegador
 
   useFocusFirstError(fieldErrors);
 
@@ -74,42 +51,11 @@ export default function MovementForm({
     movement?.movement_type === type ? movement.category : null,
     "Elige una categoría",
   );
-  const symbols = Object.fromEntries(catalogs.currencies.map((item) => [item.code, item.symbol]));
-  const currencyOptions = catalogs.currencies.map((item) => ({
-    value: item.code,
-    label: item.symbol,
-    ariaLabel: item.name,
-    disabled: !canUse(item.code, rate),
-  }));
-  // Un movimiento anotado en una moneda ya desactivada puede conservarla.
-  if (movement && !(movement.original_currency in symbols)) {
-    currencyOptions.push({ value: movement.original_currency, label: movement.original_currency });
-  }
-  // En otra moneda se enseña cuánto será en dólares; el número que vale lo calcula el backend.
-  const typed = parseAmount(amount);
-  const equivalent =
-    currency === "USD"
-      ? null
-      : typed
-        ? `≈ ${formatMoney(approxUsd(typed, currency, rate), symbols.USD)} con la tasa de hoy`
-        : "Se guardará en dólares con la tasa de hoy.";
   const paymentMethodOptions = toOptions(
     catalogs.payment_methods,
     movement?.payment_method,
     "Elige un método de pago",
   );
-
-  function openCalendar() {
-    try {
-      calendar.current.showPicker();
-    } catch {
-      // Navegadores antiguos sin showPicker: queda escribir la fecha a mano.
-      setFieldErrors({
-        ...fieldErrors,
-        date: "Este navegador no abre el calendario: escribe la fecha.",
-      });
-    }
-  }
 
   function changeType(newType) {
     setType(newType);
@@ -123,14 +69,8 @@ export default function MovementForm({
     if (!amount.trim()) missing.amount = "Escribe el monto.";
     if (!category) missing.category = "Elige una categoría.";
     if (!paymentMethod) missing.payment_method = "Elige un método de pago.";
-    const dateText = parseTypedDate(date);
-    if (!date.trim()) {
-      missing.date = "Escribe la fecha.";
-    } else if (!dateText) {
-      missing.date = "Escribe una fecha válida, como 15/10/2026 (día/mes/año).";
-    } else if (dateText > today()) {
-      missing.date = "La fecha no puede ser futura.";
-    }
+    const checked = checkTypedDate(date);
+    if (checked.error) missing.date = checked.error;
     setFieldErrors(missing);
     setGeneralError("");
     if (Object.keys(missing).length > 0) {
@@ -140,10 +80,9 @@ export default function MovementForm({
     const body = {
       category: Number(category),
       payment_method: Number(paymentMethod),
-      // En Venezuela los decimales se escriben con coma; la API los espera con punto.
-      amount: amount.trim().replace(",", "."),
+      amount: amountForApi(amount),
       currency,
-      date: dateText, // la API espera "2026-10-15"
+      date: checked.date, // la API espera "2026-10-15"
       description: description.trim(),
     };
 
@@ -173,40 +112,17 @@ export default function MovementForm({
         value={type}
         onChange={changeType}
       />
-
-      <div>
-        <div className="flex items-start gap-2">
-          <Field
-            label="Monto"
-            inputMode="decimal" // teclado numérico en el móvil
-            placeholder="0,00"
-            autoComplete="off"
-            value={amount}
-            error={fieldErrors.amount}
-            onChange={(event) => setAmount(event.target.value)}
-            className="min-w-0 flex-1"
-          />
-          {/* mt-6: a la altura del campo, bajo la etiqueta "Monto". */}
-          <SegmentedControl
-            label="Moneda del monto"
-            options={currencyOptions}
-            value={currency}
-            onChange={setCurrency}
-            className="mt-6 shrink-0"
-          />
-        </div>
-        {equivalent && (
-          <p aria-live="polite" className="mt-1 text-sm text-muted-foreground">
-            {equivalent}
-          </p>
-        )}
-        {fieldErrors.currency && (
-          <p role="alert" className="mt-1 text-sm text-danger">
-            {fieldErrors.currency}
-          </p>
-        )}
-      </div>
-      {currency !== "USD" && <RateNotice rate={rate} symbols={symbols} />}
+      <AmountField
+        amount={amount}
+        currency={currency}
+        onAmountChange={setAmount}
+        onCurrencyChange={setCurrency}
+        currencies={catalogs.currencies}
+        rate={rate}
+        errors={fieldErrors}
+        // Un movimiento anotado en una moneda ya desactivada puede conservarla.
+        extraCurrency={movement?.original_currency}
+      />
       <Field
         label="Categoría"
         options={categoryOptions}
@@ -221,63 +137,7 @@ export default function MovementForm({
         error={fieldErrors.payment_method}
         onChange={(event) => setPaymentMethod(event.target.value)}
       />
-      <div>
-        <div className="flex items-start gap-2">
-          <Field
-            label="Fecha"
-            inputMode="numeric" // teclado numérico en el móvil; las barras se ponen solas
-            placeholder="dd/mm/aaaa"
-            hint="Día/mes/año, por ejemplo 15/10/2026."
-            autoComplete="off"
-            value={date}
-            error={fieldErrors.date}
-            onChange={(event) => setDate(maskTypedDate(event.target.value))}
-            className="min-w-0 flex-1"
-          />
-          {/* Para cualquier otro día: el calendario del navegador. Solo se usa para
-              elegir; lo elegido se escribe en el campo como dd/mm/aaaa. El campo
-              oculto va junto al botón para que el calendario se abra ahí.
-              mt-6: a la altura del campo, bajo la etiqueta "Fecha". */}
-          <div className="relative mt-6 shrink-0">
-            <Button
-              variant="secondary"
-              icon={CalendarDays}
-              onClick={openCalendar}
-              aria-label="Elegir la fecha en el calendario"
-              className="min-w-11"
-            >
-              {/* En móvil solo el icono, para que quepa junto al campo. */}
-              <span className="hidden sm:inline">Calendario</span>
-            </Button>
-            <input
-              ref={calendar}
-              type="date"
-              tabIndex={-1}
-              aria-hidden="true"
-              max={today()}
-              value={parseTypedDate(date) ?? ""}
-              onChange={(event) => event.target.value && setDate(toTypedDate(event.target.value))}
-              className="pointer-events-none absolute right-0 bottom-0 h-px w-px opacity-0"
-            />
-          </div>
-        </div>
-        <div className="mt-2 flex gap-2">
-          {[
-            ["Hoy", today()],
-            ["Ayer", shiftDay(today(), -1)],
-          ].map(([label, value]) => (
-            <Button
-              key={label}
-              variant="secondary"
-              aria-pressed={date === toTypedDate(value)}
-              onClick={() => setDate(toTypedDate(value))}
-              className="aria-pressed:border-primary aria-pressed:text-primary"
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      </div>
+      <DateField value={date} onChange={setDate} error={fieldErrors.date} />
       <Field
         label="Descripción (opcional)"
         maxLength={200}

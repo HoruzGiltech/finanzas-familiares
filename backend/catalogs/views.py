@@ -22,6 +22,7 @@ from .serializers import (
 
 DUPLICATE_NAME = "Ya existe uno con este nombre."
 LAST_ACTIVE = "Debe quedar al menos uno activo."
+IN_BUDGET = "Esta categoría se usa en el presupuesto. Quita esas partidas o desactívala."
 IN_USE = (
     "{label} tiene {count}. Desactíva{pronoun} para que no se pueda elegir; así no se pierde nada."
 )
@@ -117,6 +118,9 @@ def delete_item(item, siblings, label):
     """
     if item.movement_set.exists():
         return in_use(item, label)
+    # Las categorías también las usa el presupuesto (spec 010); los métodos de pago no.
+    if hasattr(item, "budget_items") and item.budget_items.exists():
+        return bad_request("detail", IN_BUDGET)
     if item.is_active and not siblings.filter(is_active=True).exists():
         return bad_request("detail", LAST_ACTIVE)
     try:

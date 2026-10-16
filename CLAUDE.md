@@ -139,6 +139,10 @@ solo esas variables, nunca colores sueltos.
 - Tasas en la app `rates`. `rates.services.today_rate()` da la tasa de hoy (y
   consulta al BCV si hace falta); las conversiones usan sus `to_usd` y
   `from_usd`. Las pruebas nunca salen a internet: simulan `rates.sources`.
+- Presupuesto en la app `budget` (spec 010): `BudgetItem` en USD; realizada
+  cuando tiene un movimiento enlazado (`SET_NULL`: si se borra, vuelve a
+  pendiente). Mismo permiso que movimientos, pero cualquier editor toca
+  cualquier partida.
 
 ## Datos de ejemplo y pruebas en el navegador
 
@@ -181,6 +185,7 @@ solo esas variables, nunca colores sueltos.
 | 007 | Comparación contra meses anteriores | Implementada |
 | 008 | Exportación a CSV y dashboard a PDF | Pendiente |
 | 009 | Borrar categorías y métodos de pago sin movimientos | Implementada |
+| 010 | Presupuesto mensual | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 

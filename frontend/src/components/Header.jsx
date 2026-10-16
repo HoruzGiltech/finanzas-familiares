@@ -1,4 +1,13 @@
-import { ArrowLeftRight, House, KeyRound, LogOut, Settings, Users, Wallet } from "lucide-react";
+import {
+  ArrowLeftRight,
+  ClipboardList,
+  House,
+  KeyRound,
+  LogOut,
+  Settings,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { NavLink } from "react-router";
 
 import { useAuth } from "../auth/AuthContext.jsx";
@@ -82,8 +91,13 @@ export default function Header() {
               <ArrowLeftRight aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
               Movimientos
             </NavLink>
+            <NavLink to="/presupuesto" className={navLinkClass}>
+              <ClipboardList aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
+              Presupuesto
+            </NavLink>
+            {/* En móvil no caben cinco enlaces: Miembros está dentro de Configuración. */}
             {isAdmin && (
-              <NavLink to="/miembros" className={navLinkClass}>
+              <NavLink to="/miembros" className={(state) => `${navLinkClass(state)} max-sm:hidden`}>
                 <Users aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
                 Miembros
               </NavLink>
@@ -95,7 +109,10 @@ export default function Header() {
               </NavLink>
             )}
             {/* Solo en escritorio; en móvil está en la barra superior. */}
-            <NavLink to="/cambiar-clave" className={(state) => `${navLinkClass(state)} max-sm:hidden`}>
+            <NavLink
+              to="/cambiar-clave"
+              className={(state) => `${navLinkClass(state)} max-sm:hidden`}
+            >
               <KeyRound aria-hidden="true" className="h-5 w-5 sm:h-4 sm:w-4" />
               Contraseña
             </NavLink>

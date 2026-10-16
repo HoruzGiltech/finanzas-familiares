@@ -1,0 +1,278 @@
+from decimal import Decimal
+
+from django.db import transaction
+from django.db.models import Sum
+from django.shortcuts import get_object_or_404
+from rest_framework import serializers, status
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from accounts.permissions import CanEditMovements
+from catalogs.models import MovementType
+from movements.comparison import shift_month
+from movements.models import Movement
+from movements.serializers import MovementWriteSerializer
+from movements.views import read_view
+
+from .models import BudgetItem
+from .serializers import BudgetItemWriteSerializer, ProposalSerializer
+
+ZERO = Decimal("0.00")
+ALREADY_DONE = "Esta partida ya está realizada."
+NOT_DONE = "Esta partida todavía no está realizada."
+
+
+def movement_data(movement, convert, user):
+    """El movimiento de una partida realizada."""
+    return {
+        "id": movement.id,
+        "date": movement.date.isoformat(),
+        "amount": str(convert(movement.amount)),
+        "original_amount": str(movement.original_amount),
+        "original_currency": movement.original_currency.code,
+        "payment_method": movement.payment_method.name,
+        # Deshacer borra el movimiento: solo quien podría borrarlo (spec 004).
+        "can_undo": movement.can_be_edited_by(user),
+    }
+
+
+def item_data(item, convert, user):
+    """Lo que la API devuelve de una partida. Los montos, en la moneda que se ve."""
+    return {
+        "id": item.id,
+        "month": item.month.strftime("%Y-%m"),
+        "description": item.description,
+        "category": {"id": item.category_id, "name": item.category.name},
+        "amount": str(convert(item.amount)),
+        "movement": movement_data(item.movement, convert, user) if item.is_done else None,
+    }
+
+
+def items_of(family, month):
+    return BudgetItem.objects.filter(family=family, month=month).select_related(
+        "category", "movement__payment_method", "movement__original_currency"
+    )
+
+
+def has_items(family, month):
+    return BudgetItem.objects.filter(family=family, month=month).exists()
+
+
+class BudgetView(APIView):
+    """El presupuesto de un mes con sus totales. Lo ve cualquier miembro."""
+
+    def get(self, request):
+        view = read_view(request)
+        family = request.user.family
+        month = view.month.replace(day=1)
+        items = list(items_of(family, month))
+
+        planned = sum((item.amount for item in items), ZERO)
+        done = sum((item.movement.amount for item in items if item.is_done), ZERO)
+        pending = sum((item.amount for item in items if not item.is_done), ZERO)
+        # Gastos del mes que no vienen de ninguna partida.
+        unplanned = view.movements.filter(
+            category__movement_type__code=MovementType.EXPENSE, budget_item__isnull=True
+        ).aggregate(total=Sum("amount"))["total"] or ZERO
+
+        return Response(
+            {
+                **view.header(),
+                "totals": {
+                    "planned": str(view.convert(planned)),
+                    "done": str(view.convert(done)),
+                    "pending": str(view.convert(pending)),
+                    "unplanned": str(view.convert(unplanned)),
+                },
+                # La propuesta se ofrece si este mes está vacío y el anterior no.
+                "can_propose": not items and has_items(family, shift_month(month, -1)),
+                "items": [item_data(item, view.convert, request.user) for item in items],
+            }
+        )
+
+
+def base_convert(amount):
+    """Las respuestas de escritura van en USD, la moneda en que se guarda."""
+    return amount
+
+
+class BudgetItemListView(APIView):
+    permission_classes = [CanEditMovements]
+
+    def post(self, request):
+        family = request.user.family
+        serializer = BudgetItemWriteSerializer(data=request.data, context={"family": family})
+        serializer.is_valid(raise_exception=True)
+        item = BudgetItem.objects.create(
+            family=family, created_by=request.user, **serializer.validated_data
+        )
+        return Response(item_data(item, base_convert, request.user), status=status.HTTP_201_CREATED)
+
+
+class BudgetItemDetailView(APIView):
+    # Cualquier administrador o editor toca cualquier partida: es un plan común.
+    permission_classes = [CanEditMovements]
+
+    def get_item(self, request, item_id):
+        # Buscar dentro de la familia: lo de otra familia responde 404.
+        related = BudgetItem.objects.select_related(
+            "category", "movement__payment_method", "movement__original_currency"
+        )
+        return get_object_or_404(related, pk=item_id, family=request.user.family)
+
+    def patch(self, request, item_id):
+        item = self.get_item(request, item_id)
+        data = {key: value for key, value in request.data.items() if key != "month"}
+        serializer = BudgetItemWriteSerializer(
+            item, data=data, partial=True, context={"family": request.user.family}
+        )
+        serializer.is_valid(raise_exception=True)
+        for field, value in serializer.validated_data.items():
+            setattr(item, field, value)
+        item.save()
+        return Response(item_data(item, base_convert, request.user))
+
+    def delete(self, request, item_id):
+        # Si estaba realizada, su movimiento se queda: el gasto se hizo igual.
+        self.get_item(request, item_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class RealizeView(APIView):
+    """Marca una partida como realizada: crea su movimiento (spec 010, regla 7)."""
+
+    permission_classes = [CanEditMovements]
+
+    def post(self, request, item_id):
+        family = request.user.family
+        with transaction.atomic():
+            # select_for_update: dos clics seguidos no crean dos movimientos.
+            item = get_object_or_404(
+                BudgetItem.objects.select_for_update(), pk=item_id, family=family
+            )
+            if item.is_done:
+                raise ValidationError({"detail": [ALREADY_DONE]})
+            # Se valida como cualquier movimiento nuevo: método de pago, monto,
+            # moneda (tasa de hoy) y fecha.
+            serializer = MovementWriteSerializer(
+                data={
+                    "category": item.category_id,
+                    "description": item.description,
+                    "payment_method": request.data.get("payment_method"),
+                    "amount": request.data.get("amount"),
+                    "currency": request.data.get("currency", "USD"),
+                    "date": request.data.get("date"),
+                },
+                context={"family": family},
+            )
+            serializer.is_valid(raise_exception=True)
+            item.movement = Movement.objects.create(
+                family=family, created_by=request.user, **serializer.validated_data
+            )
+            item.save()
+        item = items_of(family, item.month).get(pk=item.pk)
+        return Response(item_data(item, base_convert, request.user))
+
+
+class UndoView(APIView):
+    """Deshace una partida realizada: borra su movimiento y la deja pendiente."""
+
+    permission_classes = [CanEditMovements]
+
+    def post(self, request, item_id):
+        item = get_object_or_404(
+            BudgetItem.objects.select_related("movement"), pk=item_id, family=request.user.family
+        )
+        if not item.is_done:
+            raise ValidationError({"detail": [NOT_DONE]})
+        if not item.movement.can_be_edited_by(request.user):
+            raise PermissionDenied("Solo puede deshacerla quien anotó el gasto o un administrador.")
+        # Al borrar el movimiento, la partida queda pendiente sola (SET_NULL).
+        item.movement.delete()
+        item.refresh_from_db()
+        return Response(item_data(item, base_convert, request.user))
+
+
+class MonthParamSerializer(serializers.Serializer):
+    month = serializers.DateField(input_formats=["%Y-%m"])
+
+
+class ProposalView(APIView):
+    """La propuesta del mes a partir del anterior (spec 010, sección 4). Todo en USD."""
+
+    permission_classes = [CanEditMovements]
+
+    def get(self, request):
+        params = MonthParamSerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+        family = request.user.family
+        previous = shift_month(params.validated_data["month"].replace(day=1), -1)
+
+        items = [
+            {
+                "description": item.description,
+                "category": {"id": item.category_id, "name": item.category.name},
+                # Lo que realmente se gastó si se realizó; si no, lo previsto.
+                "proposed": str(item.movement.amount if item.is_done else item.amount),
+                "planned": str(item.amount),
+                "spent": str(item.movement.amount) if item.is_done else None,
+            }
+            for item in items_of(family, previous)
+        ]
+        # Gastos del mes anterior que no venían de ninguna partida, por categoría.
+        unplanned = (
+            Movement.objects.filter(
+                family=family,
+                date__year=previous.year,
+                date__month=previous.month,
+                category__movement_type__code=MovementType.EXPENSE,
+                budget_item__isnull=True,
+            )
+            .values("category_id", "category__name")
+            .annotate(total=Sum("amount"))
+            .order_by("-total", "category__name")
+        )
+        return Response(
+            {
+                "month": params.validated_data["month"].strftime("%Y-%m"),
+                "previous_month": previous.strftime("%Y-%m"),
+                "items": items,
+                "unplanned": [
+                    {
+                        "category": {"id": row["category_id"], "name": row["category__name"]},
+                        "amount": str(row["total"]),
+                    }
+                    for row in unplanned
+                ],
+            }
+        )
+
+    def post(self, request):
+        family = request.user.family
+        proposal = ProposalSerializer(data=request.data)
+        proposal.is_valid(raise_exception=True)
+        month_text = proposal.validated_data["month"].strftime("%Y-%m")
+
+        # Cada partida se valida como una partida nueva; si una falla, no se crea ninguna.
+        valid, errors = [], {}
+        for index, data in enumerate(proposal.validated_data["items"]):
+            item = BudgetItemWriteSerializer(
+                data={**data, "month": month_text}, context={"family": family}
+            )
+            if item.is_valid():
+                valid.append(item.validated_data)
+            else:
+                errors[str(index)] = item.errors
+        if errors:
+            raise ValidationError({"items": errors})
+
+        with transaction.atomic():
+            created = [
+                BudgetItem.objects.create(family=family, created_by=request.user, **data)
+                for data in valid
+            ]
+        return Response(
+            [item_data(item, base_convert, request.user) for item in created],
+            status=status.HTTP_201_CREATED,
+        )

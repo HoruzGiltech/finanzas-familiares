@@ -5,6 +5,7 @@ import { useAuth } from "./auth/AuthContext.jsx";
 import Header from "./components/Header.jsx";
 import Skeleton from "./components/Skeleton.jsx";
 import { pageTransition } from "./lib/motion.js";
+import Budget from "./pages/Budget.jsx";
 import ChangePassword from "./pages/ChangePassword.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
@@ -67,15 +68,69 @@ export default function App() {
             exit={pageTransition.exit}
           >
             <Routes location={location}>
-              <Route path="/entrar" element={<PublicOnly><Login /></PublicOnly>} />
-              <Route path="/registro" element={<PublicOnly><Register /></PublicOnly>} />
-              <Route path="/" element={<Private><Home /></Private>} />
-              <Route path="/movimientos" element={<Private><Movements /></Private>} />
-              <Route path="/cambiar-clave" element={<Private><ChangePassword /></Private>} />
-              <Route path="/miembros" element={<Private adminOnly><Members /></Private>} />
+              <Route
+                path="/entrar"
+                element={
+                  <PublicOnly>
+                    <Login />
+                  </PublicOnly>
+                }
+              />
+              <Route
+                path="/registro"
+                element={
+                  <PublicOnly>
+                    <Register />
+                  </PublicOnly>
+                }
+              />
+              <Route
+                path="/"
+                element={
+                  <Private>
+                    <Home />
+                  </Private>
+                }
+              />
+              <Route
+                path="/movimientos"
+                element={
+                  <Private>
+                    <Movements />
+                  </Private>
+                }
+              />
+              <Route
+                path="/presupuesto"
+                element={
+                  <Private>
+                    <Budget />
+                  </Private>
+                }
+              />
+              <Route
+                path="/cambiar-clave"
+                element={
+                  <Private>
+                    <ChangePassword />
+                  </Private>
+                }
+              />
+              <Route
+                path="/miembros"
+                element={
+                  <Private adminOnly>
+                    <Members />
+                  </Private>
+                }
+              />
               <Route
                 path="/configuracion"
-                element={<Private adminOnly><Settings /></Private>}
+                element={
+                  <Private adminOnly>
+                    <Settings />
+                  </Private>
+                }
               />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
