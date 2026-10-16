@@ -277,3 +277,108 @@ class WriteTests(BaseTestCase):
 
         for response in responses:
             self.assertEqual(response.status_code, 401)
+
+
+class DeleteTests(BaseTestCase):
+    """Borrar categorías y métodos de pago sin movimientos (spec 009)."""
+
+    def use(self, category, payment_method="Efectivo"):
+        """Anota un movimiento con esa categoría y ese método de pago."""
+        from movements.models import Movement  # catalogs no depende de movements
+
+        Movement.objects.create(
+            family=self.family,
+            category=self.category(category),
+            payment_method=self.payment_method(payment_method),
+            amount="10.00",
+            original_amount="10.00",
+            original_currency=Currency.objects.get(code="USD"),
+            date="2026-10-01",
+            created_by=self.admin,
+        )
+
+    def test_admin_deletes_unused_category_active_or_not(self):
+        pets = Category.objects.create(
+            family=self.family,
+            movement_type=MovementType.objects.get(code="expense"),
+            name="Mascotas",
+            is_active=False,
+        )
+        clothes = self.category("Ropa y calzado")
+
+        self.assertEqual(self.client.delete(f"/api/categories/{pets.id}/").status_code, 204)
+        self.assertEqual(self.client.delete(f"/api/categories/{clothes.id}/").status_code, 204)
+
+        self.assertFalse(Category.objects.filter(pk__in=[pets.id, clothes.id]).exists())
+        names = [c["name"] for c in self.client.get("/api/catalogs/").json()["categories"]]
+        self.assertNotIn("Ropa y calzado", names)
+
+    def test_admin_deletes_unused_payment_method(self):
+        zelle = self.payment_method("Zelle")
+
+        response = self.client.delete(f"/api/payment-methods/{zelle.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(PaymentMethod.objects.filter(pk=zelle.id).exists())
+
+    def test_items_with_movements_are_not_deleted(self):
+        self.use("Alimentación")
+        self.use("Alimentación")
+        food = self.category("Alimentación")
+        cash = self.payment_method("Efectivo")
+
+        by_category = self.client.delete(f"/api/categories/{food.id}/")
+        by_method = self.client.delete(f"/api/payment-methods/{cash.id}/")
+
+        self.assertEqual(by_category.status_code, 400)
+        self.assertEqual(
+            by_category.json()["detail"],
+            [
+                "Esta categoría tiene 2 movimientos. Desactívala para que no se pueda "
+                "elegir; así no se pierde nada."
+            ],
+        )
+        self.assertEqual(by_method.status_code, 400)
+        self.assertIn(
+            "Este método de pago tiene 2 movimientos. Desactívalo", by_method.json()["detail"][0]
+        )
+        self.assertTrue(Category.objects.filter(pk=food.id).exists())
+        self.assertTrue(PaymentMethod.objects.filter(pk=cash.id).exists())
+
+    def test_last_active_item_cannot_be_deleted(self):
+        income = Category.objects.filter(family=self.family, movement_type__code="income")
+        last = income.first()
+        income.exclude(pk=last.pk).update(is_active=False)
+
+        response = self.client.delete(f"/api/categories/{last.id}/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], ["Debe quedar al menos uno activo."])
+
+    def test_editor_viewer_other_family_and_anonymous(self):
+        food = self.category("Alimentación")
+        foreign = self.category("Alimentación", self.other_family)
+        url = f"/api/categories/{food.id}/"
+
+        self.assertEqual(self.client_for(self.editor).delete(url).status_code, 403)
+        self.assertEqual(self.client_for(self.viewer).delete(url).status_code, 403)
+        self.assertEqual(APIClient().delete(url).status_code, 401)
+        self.assertEqual(
+            self.client.delete(f"/api/categories/{foreign.id}/").status_code, 404
+        )
+        self.assertEqual(Category.objects.filter(pk__in=[food.id, foreign.id]).count(), 2)
+
+    def test_settings_list_counts_movements(self):
+        self.use("Alimentación", "Pago móvil")
+        self.use("Vivienda", "Pago móvil")
+
+        data = self.client.get("/api/catalogs/?include_inactive=1").json()
+        counts = {c["name"]: c["movement_count"] for c in data["categories"]}
+        methods = {m["name"]: m["movement_count"] for m in data["payment_methods"]}
+
+        self.assertEqual(counts["Alimentación"], 1)
+        self.assertEqual(counts["Salud"], 0)
+        self.assertEqual(methods["Pago móvil"], 2)
+        # La lista de los formularios no trae el número.
+        plain = self.client.get("/api/catalogs/").json()["categories"][0]
+        self.assertNotIn("movement_count", plain)

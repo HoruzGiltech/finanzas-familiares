@@ -5,7 +5,7 @@ import Alert from "../components/Alert.jsx";
 import Card from "../components/Card.jsx";
 import EditableList from "../components/EditableList.jsx";
 import Skeleton from "../components/Skeleton.jsx";
-import { apiGet, apiPatch, apiPost, readErrors } from "../lib/api.js";
+import { apiDelete, apiGet, apiPatch, apiPost, readErrors } from "../lib/api.js";
 import { slideUp, staggerList } from "../lib/motion.js";
 
 // Llama a la API y devuelve { data, error }: los datos si salió bien, o el
@@ -21,6 +21,10 @@ async function save(call) {
   } catch (err) {
     return { data: null, error: err.message };
   }
+}
+
+function withoutId(list, removed) {
+  return list.filter((item) => item.id !== removed.id);
 }
 
 function replaceById(list, updated) {
@@ -66,6 +70,17 @@ export default function Settings() {
     return error;
   }
 
+  async function deleteCategory(category) {
+    const { error } = await save(() => apiDelete(`/categories/${category.id}/`));
+    if (!error) {
+      setCatalogs((current) => ({
+        ...current,
+        categories: withoutId(current.categories, category),
+      }));
+    }
+    return error;
+  }
+
   // --- Métodos de pago ---
 
   async function addPaymentMethod(name) {
@@ -85,6 +100,17 @@ export default function Settings() {
       setCatalogs((current) => ({
         ...current,
         payment_methods: replaceById(current.payment_methods, data),
+      }));
+    }
+    return error;
+  }
+
+  async function deletePaymentMethod(method) {
+    const { error } = await save(() => apiDelete(`/payment-methods/${method.id}/`));
+    if (!error) {
+      setCatalogs((current) => ({
+        ...current,
+        payment_methods: withoutId(current.payment_methods, method),
       }));
     }
     return error;
@@ -117,7 +143,8 @@ export default function Settings() {
             <Card>
               <h2 className="text-lg font-semibold">Categorías</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Las desactivadas dejan de ofrecerse, pero no se borran.
+                Las desactivadas dejan de ofrecerse. Solo se pueden borrar las que no tienen
+                movimientos.
               </p>
               <div className="mt-4 grid gap-8 md:grid-cols-2">
                 {/* Una lista por cada tipo de movimiento que haya en la base de datos. */}
@@ -126,6 +153,7 @@ export default function Settings() {
                     key={type.code}
                     title={`De ${type.name.toLowerCase()}`}
                     addLabel={`Nueva categoría de ${type.name.toLowerCase()}`}
+                    noun="categoría"
                     items={catalogs.categories.filter(
                       (category) => category.movement_type === type.code,
                     )}
@@ -134,6 +162,7 @@ export default function Settings() {
                     onToggle={(category) =>
                       updateCategory(category, { is_active: !category.is_active })
                     }
+                    onDelete={deleteCategory}
                   />
                 ))}
               </div>
@@ -143,16 +172,21 @@ export default function Settings() {
           <motion.div variants={slideUp}>
             <Card>
               <h2 className="text-lg font-semibold">Métodos de pago</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Igual que las categorías: solo se pueden borrar los que no tienen movimientos.
+              </p>
               <div className="mt-4 max-w-xl">
                 <EditableList
                   title="Cómo se paga o se cobra"
                   addLabel="Nuevo método de pago"
+                  noun="método de pago"
                   items={catalogs.payment_methods}
                   onAdd={addPaymentMethod}
                   onRename={(method, name) => updatePaymentMethod(method, { name })}
                   onToggle={(method) =>
                     updatePaymentMethod(method, { is_active: !method.is_active })
                   }
+                  onDelete={deletePaymentMethod}
                 />
               </div>
             </Card>
@@ -162,8 +196,8 @@ export default function Settings() {
             <Card>
               <h2 className="text-lg font-semibold">Monedas</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Todo se guarda en la moneda base. Las tasas oficiales del BCV para
-                ver los montos en las demás llegarán en un próximo paso.
+                Todo se guarda en la moneda base. Los montos en las demás se ven con la tasa oficial
+                del BCV de hoy.
               </p>
               <ul className="mt-3 divide-y divide-border">
                 {catalogs.currencies.map((currency) => (

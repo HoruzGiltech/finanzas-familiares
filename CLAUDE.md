@@ -128,8 +128,9 @@ solo esas variables, nunca colores sueltos.
 - Catálogos en la app `catalogs`. Los del sistema (`MovementType`, `Currency`)
   se cargan con migraciones de datos; los de cada familia (`Category`,
   `PaymentMethod`) se crean con `catalogs/defaults.py` al registrar la familia.
-- Nada se borra: categorías, métodos de pago y usuarios se desactivan. La
-  única excepción son los movimientos, que sí se borran de verdad.
+- Nada se borra: categorías, métodos de pago y usuarios se desactivan. Las
+  excepciones son los movimientos, que sí se borran de verdad, y las
+  categorías y métodos de pago que ningún movimiento usa (spec 009).
 - Movimientos en la app `movements`. El monto se guarda positivo y en USD; si
   es ingreso o gasto lo dice su categoría. El administrador corrige y borra
   cualquiera; el editor, solo los que anotó él (`Movement.can_be_edited_by`).
@@ -179,6 +180,7 @@ solo esas variables, nunca colores sueltos.
 | 006 | Dashboard interactivo | Implementada |
 | 007 | Comparación contra meses anteriores | Pendiente |
 | 008 | Exportación a CSV y dashboard a PDF | Pendiente |
+| 009 | Borrar categorías y métodos de pago sin movimientos | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 

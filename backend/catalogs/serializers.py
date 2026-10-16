@@ -36,6 +36,25 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "is_active"]
 
 
+class CategoryAdminSerializer(CategorySerializer):
+    """Para Configuración: también cuántos movimientos la usan (spec 009).
+
+    `movement_count` lo pone la vista en el objeto (con annotate o a mano).
+    """
+
+    movement_count = serializers.IntegerField(read_only=True)
+
+    class Meta(CategorySerializer.Meta):
+        fields = CategorySerializer.Meta.fields + ["movement_count"]
+
+
+class PaymentMethodAdminSerializer(PaymentMethodSerializer):
+    movement_count = serializers.IntegerField(read_only=True)
+
+    class Meta(PaymentMethodSerializer.Meta):
+        fields = PaymentMethodSerializer.Meta.fields + ["movement_count"]
+
+
 class CategoryCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=60)
     movement_type = serializers.SlugRelatedField(
