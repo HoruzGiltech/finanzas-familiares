@@ -1,4 +1,5 @@
 import datetime
+import ssl
 from decimal import Decimal
 from pathlib import Path
 from unittest import mock
@@ -14,7 +15,7 @@ from catalogs.models import Currency
 
 from . import services
 from .models import ExchangeRate
-from .sources import SourceError, parse_bcv_page
+from .sources import EXTRA_INTERMEDIATE, SourceError, parse_bcv_page
 
 BCV_PAGE = Path(__file__).parent / "test_data" / "bcv_page.html"
 
@@ -88,6 +89,14 @@ class BcvPageTests(TestCase):
     def test_a_changed_page_is_an_error(self):
         with self.assertRaises(SourceError):
             parse_bcv_page("<html><body>Página en mantenimiento</body></html>")
+
+    def test_the_missing_bcv_intermediate_certificate_is_loaded(self):
+        # Sin red: solo que el certificado guardado es válido y se añade (spec 012).
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=EXTRA_INTERMEDIATE)
+        subjects = [dict(item[0] for item in cert["subject"]) for cert in context.get_ca_certs()]
+        names = [subject.get("commonName") for subject in subjects]
+        self.assertIn("Sectigo Public Server Authentication CA DV R36", names)
 
 
 class TodayRateTests(RatesTestCase):

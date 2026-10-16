@@ -7,9 +7,10 @@ Todo lo que puede fallar (red, página cambiada, datos raros) termina en
 import datetime
 import ssl
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
+import certifi
 import requests
-import truststore
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
@@ -27,22 +28,26 @@ class SourceError(Exception):
     """No se pudo obtener o entender la tasa."""
 
 
-class SystemCertificatesAdapter(HTTPAdapter):
-    """Valida los certificados con el almacén del sistema operativo.
+# El servidor del BCV envía un certificado intermedio equivocado: falta el que
+# firmó el suyo (Sectigo DV R36). Windows lo descarga solo, pero Linux, donde
+# corre en producción, no, y rechaza la conexión (spec 012). Se guarda aquí y
+# se añade a los certificados de siempre: se sigue verificando todo.
+EXTRA_INTERMEDIATE = Path(__file__).parent / "certs" / "sectigo-dv-r36.pem"
 
-    El servidor del BCV no envía su certificado intermedio. Windows lo
-    descarga solo y lo valida; el paquete de certificados de Python no, y
-    rechaza la conexión. Así se sigue verificando sin desactivar la seguridad.
-    """
+
+class CertificatesAdapter(HTTPAdapter):
+    """Valida con los certificados de certifi más el intermedio que el BCV no envía."""
 
     def init_poolmanager(self, *args, **kwargs):
-        kwargs["ssl_context"] = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context = ssl.create_default_context(cafile=certifi.where())
+        context.load_verify_locations(cafile=EXTRA_INTERMEDIATE)
+        kwargs["ssl_context"] = context
         return super().init_poolmanager(*args, **kwargs)
 
 
 def download(url):
     session = requests.Session()
-    session.mount("https://", SystemCertificatesAdapter())
+    session.mount("https://", CertificatesAdapter())
     try:
         response = session.get(url, timeout=TIMEOUT_SECONDS)
         response.raise_for_status()

@@ -53,7 +53,16 @@ navegador ──> app.vercel.app ──/api/*──> backend.up.railway.app ─�
      al recargar.
 8. En Vercel, `VITE_API_URL=/api`: misma dirección, sin dominio.
 
-No cambia nada del comportamiento de la aplicación.
+**Tasas del BCV en Linux** (descubierto al desplegar)
+
+9. El servidor del BCV envía un certificado intermedio equivocado. Windows
+   descarga solo el bueno, pero Linux no, así que en Railway la consulta al BCV
+   fallaba y aparecía "Todavía no hay tasa del BCV". Se guarda ese intermedio
+   (Sectigo DV R36, válido hasta 2036) en `rates/certs/` y se verifica con
+   `certifi` más ese certificado, igual en Windows y en Linux. Sale
+   `truststore`.
+
+No cambia nada más del comportamiento de la aplicación.
 
 ## 4. Variables de entorno
 
