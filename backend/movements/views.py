@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.db.models import QuerySet, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -14,9 +15,14 @@ from accounts.permissions import CanEditMovements, IsFamilyMember
 from catalogs.models import Currency, MovementType
 from rates.services import NO_RATE_MESSAGE, TodayRate, rate_data, today_rate
 
-from . import comparison, summary
+from . import comparison, export, summary
 from .models import Movement
-from .serializers import MovementFilterSerializer, MovementSerializer, MovementWriteSerializer
+from .serializers import (
+    ExportFilterSerializer,
+    MovementFilterSerializer,
+    MovementSerializer,
+    MovementWriteSerializer,
+)
 
 
 def month_totals(movements, convert):
@@ -156,6 +162,29 @@ class MovementComparisonView(APIView):
                 ),
             }
         )
+
+
+class MovementExportView(APIView):
+    """Los movimientos de un rango en CSV. Lo descarga cualquier miembro (spec 008)."""
+
+    def get(self, request):
+        filters = ExportFilterSerializer(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        start, end = filters.validated_data["from"], filters.validated_data["to"]
+
+        movements = (
+            Movement.objects.filter(family=request.user.family, date__range=(start, end))
+            .select_related(
+                "category__movement_type", "payment_method", "created_by", "original_currency"
+            )
+            .order_by("date", "id")  # del más antiguo al más reciente
+        )
+        response = HttpResponse(
+            export.movements_csv(movements), content_type="text/csv; charset=utf-8"
+        )
+        filename = f"movimientos-{start.isoformat()}-a-{end.isoformat()}.csv"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class MovementDetailView(APIView):

@@ -33,6 +33,25 @@ body {
   font-family: var(--font-sans);
 }
 
+/* El dashboard en PDF (spec 008): los colores se imprimen como en pantalla,
+   sobre blanco, y todo aparece ya en su sitio, sin animaciones. */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  body {
+    background-color: white;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 /* Foco visible y uniforme para quien navega con teclado. */
 :focus-visible {
   outline: 2px solid var(--color-primary);

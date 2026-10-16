@@ -2,6 +2,7 @@ import {
   ArrowRight,
   ChartNoAxesColumn,
   ClipboardList,
+  Printer,
   Scale,
   TrendingDown,
   TrendingUp,
@@ -14,6 +15,7 @@ import { Link } from "react-router";
 import { useAuth } from "../auth/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
 import BarList from "../components/BarList.jsx";
+import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
 import CategoryChanges from "../components/CategoryChanges.jsx";
 import ChangeLine from "../components/ChangeLine.jsx";
@@ -26,8 +28,17 @@ import Skeleton from "../components/Skeleton.jsx";
 import TotalCard from "../components/TotalCard.jsx";
 import { apiGet, readErrors } from "../lib/api.js";
 import { BASE, currencySymbols, saveCurrency, savedCurrency } from "../lib/currency.js";
-import { currentMonth, formatDay, formatMoney, formatMonthName } from "../lib/format.js";
+import {
+  currentMonth,
+  formatDay,
+  formatMoney,
+  formatMonth,
+  formatMonthName,
+  toTypedDate,
+  today,
+} from "../lib/format.js";
 import { slideUp, staggerList } from "../lib/motion.js";
+import { rateSummary } from "../lib/rates.js";
 
 const linkClass =
   "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 " +
@@ -48,10 +59,11 @@ function comparedWith(comparison) {
   return comparison.partial_until ? `1–${comparison.partial_until} de ${name}` : name;
 }
 
-// Bloque del dashboard: tarjeta con título que entra con los demás.
+// Bloque del dashboard: tarjeta con título que entra con los demás. En el PDF
+// no se parte entre dos páginas.
 function Block({ title, className = "", children }) {
   return (
-    <motion.div variants={slideUp} className={className}>
+    <motion.div variants={slideUp} className={`break-inside-avoid ${className}`}>
       <Card className="h-full p-4 sm:p-5">
         {title && <h2 className="mb-3 font-semibold">{title}</h2>}
         {children}
@@ -70,6 +82,25 @@ function EmptyMonth({ icon: Icon, title, text, action }) {
         {action}
       </div>
     </Block>
+  );
+}
+
+// Encabezado que solo sale en el PDF (spec 008): de quién, qué mes, en qué
+// moneda y con qué tasa.
+function PrintHeader({ family, data, symbols }) {
+  const { rate } = data;
+  return (
+    <div className="mb-4 hidden border-b border-border pb-3 print:block">
+      <p className="text-lg font-semibold">
+        Finanzas Familiares · {family} · {formatMonth(data.month)} · Montos en {data.currency}
+      </p>
+      {data.currency !== BASE && rate.date && (
+        <p className="mt-1 text-sm">
+          Tasa BCV del {formatDay(rate.date).toLowerCase()}: {rateSummary(rate, symbols)}
+        </p>
+      )}
+      <p className="mt-1 text-sm text-muted-foreground">Generado el {toTypedDate(today())}</p>
+    </div>
   );
 }
 
@@ -124,7 +155,7 @@ function Dashboard({ data, symbol, canAdd }) {
       animate="visible"
       className="mt-4 space-y-3"
     >
-      <div className="grid gap-2 sm:grid-cols-3 sm:gap-3">
+      <div className="grid break-inside-avoid gap-2 sm:grid-cols-3 sm:gap-3">
         <TotalCard
           icon={TrendingUp}
           label="Ingresos"
@@ -167,7 +198,7 @@ function Dashboard({ data, symbol, canAdd }) {
           }
           action={
             canAdd && (
-              <Link to="/movimientos" className={`${linkClass} mt-4`}>
+              <Link to="/movimientos" className={`${linkClass} mt-4 print:hidden`}>
                 Registrar movimiento
               </Link>
             )
@@ -290,26 +321,44 @@ export default function Home() {
     saveCurrency(code);
   }
 
+  // "Descargar PDF": el diálogo de imprimir del navegador, donde se elige
+  // "Guardar como PDF". El título es el nombre que propone para el archivo.
+  function printDashboard() {
+    const previousTitle = document.title;
+    document.title = `Finanzas Familiares - ${formatMonth(month)}`;
+    window.addEventListener("afterprint", () => (document.title = previousTitle), { once: true });
+    window.print();
+  }
+
   const symbols = currencySymbols(catalogs);
   const ready = data && catalogs;
 
   return (
     <section>
-      <div className="flex items-start justify-between gap-4">
+      {ready && <PrintHeader family={user.family.name} data={data} symbols={symbols} />}
+
+      <div className="flex items-start justify-between gap-4 print:hidden">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold">Hola, {firstName}</h1>
           <p className="mt-1 text-muted-foreground">Así va el mes de {user.family.name}.</p>
         </div>
-        <Link to="/movimientos" className={`${linkClass} max-sm:hidden`}>
-          {canAdd ? "Registrar movimiento" : "Ver movimientos"}
-          <ArrowRight aria-hidden="true" className="h-4 w-4" />
-        </Link>
+        <div className="flex shrink-0 gap-2">
+          {ready && (
+            <Button variant="secondary" icon={Printer} onClick={printDashboard}>
+              Descargar PDF
+            </Button>
+          )}
+          <Link to="/movimientos" className={`${linkClass} max-sm:hidden`}>
+            {canAdd ? "Registrar movimiento" : "Ver movimientos"}
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        </div>
       </div>
 
       {budgetPending && (
         <Link
           to="/presupuesto"
-          className="mt-4 flex min-h-11 items-center gap-3 rounded-xl border border-primary/20 bg-primary-soft px-4 py-3 text-sm transition-colors duration-150 hover:border-primary/40"
+          className="mt-4 flex min-h-11 items-center gap-3 rounded-xl border border-primary/20 bg-primary-soft px-4 py-3 text-sm transition-colors duration-150 hover:border-primary/40 print:hidden"
         >
           <ClipboardList aria-hidden="true" className="h-5 w-5 shrink-0 text-primary" />
           <span className="flex-1">
@@ -320,7 +369,7 @@ export default function Home() {
         </Link>
       )}
 
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row print:hidden">
         <div className="sm:flex-1">
           <MonthPicker month={month} onChange={changeMonth} />
         </div>
@@ -335,7 +384,12 @@ export default function Home() {
         )}
       </div>
 
-      {ready && <RateInfo rate={data.rate} symbols={symbols} />}
+      {/* En el PDF la tasa va en el encabezado. */}
+      {ready && (
+        <div className="print:hidden">
+          <RateInfo rate={data.rate} symbols={symbols} />
+        </div>
+      )}
 
       {(catalogError || loadError) && <Alert className="mt-4">{catalogError || loadError}</Alert>}
 
@@ -359,7 +413,7 @@ export default function Home() {
       {ready && (
         <Link
           to="/movimientos"
-          className="mt-4 flex min-h-11 items-center justify-center gap-2 text-sm font-semibold text-primary sm:hidden"
+          className="mt-4 flex min-h-11 items-center justify-center gap-2 text-sm font-semibold text-primary sm:hidden print:hidden"
         >
           Ver todos los movimientos
           <ArrowRight aria-hidden="true" className="h-4 w-4" />

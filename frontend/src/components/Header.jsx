@@ -33,7 +33,8 @@ export default function Header() {
   const isAdmin = user.role === "admin";
 
   return (
-    <header className="border-b border-border bg-card">
+    // print:hidden: el PDF del dashboard (spec 008) no lleva la navegación.
+    <header className="border-b border-border bg-card print:hidden">
       <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
         <span className="flex items-center gap-2 text-lg font-semibold text-primary">
           <Wallet aria-hidden="true" className="h-5 w-5" />

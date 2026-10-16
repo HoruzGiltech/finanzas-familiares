@@ -1,4 +1,6 @@
+import csv
 import datetime
+import io
 import os
 from decimal import Decimal
 from unittest import mock
@@ -16,6 +18,7 @@ from catalogs.models import Category, Currency, PaymentMethod
 from rates.models import ExchangeRate
 from rates.sources import SourceError
 
+from . import export
 from .models import Movement
 
 PASSWORD = "clave-Segura-2026"
@@ -789,6 +792,116 @@ class ComparisonTests(BaseTestCase):
             response = self.client.get(f"/api/movements/comparison/?{query}")
             self.assertEqual(response.status_code, 400, query)
         self.assertEqual(APIClient().get(self.URL).status_code, 401)
+
+
+class ExportTests(BaseTestCase):
+    """Spec 008: los movimientos de un rango en CSV."""
+
+    def export(self, client=None, start=None, end=None):
+        start = start or self.today.replace(day=1)
+        end = end or self.today
+        return (client or self.client).get(
+            "/api/movements/export/", {"from": start.isoformat(), "to": end.isoformat()}
+        )
+
+    def rows(self, response):
+        content = response.content.decode("utf-8")
+        self.assertTrue(content.startswith("﻿"))  # BOM, para Excel
+        return list(csv.reader(io.StringIO(content[1:]), delimiter=";"))
+
+    def test_every_member_downloads_the_range_from_oldest_to_newest(self):
+        start = self.today - datetime.timedelta(days=10)
+        older = self.make_movement(amount="10.00", date=start)
+        newer = self.make_movement(amount="20.00", user=self.editor)
+        self.make_movement(date=start - datetime.timedelta(days=1))  # fuera del rango
+
+        for user in (self.admin, self.editor, self.viewer):
+            response = self.export(self.client_for(user), start, self.today)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+            filename = f"movimientos-{start.isoformat()}-a-{self.today.isoformat()}.csv"
+            self.assertEqual(response["Content-Disposition"], f'attachment; filename="{filename}"')
+            rows = self.rows(response)
+            self.assertEqual(
+                rows[0],
+                [
+                    "Fecha",
+                    "Tipo",
+                    "Categoría",
+                    "Descripción",
+                    "Método de pago",
+                    "Monto USD",
+                    "Monto anotado",
+                    "Moneda anotada",
+                    "Tasa usada",
+                    "Anotado por",
+                ],
+            )
+            dates = [row[0] for row in rows[1:]]
+            expected = [older.date.strftime("%d/%m/%Y"), newer.date.strftime("%d/%m/%Y")]
+            self.assertEqual(dates, expected)
+            self.assertEqual(rows[2][9], self.editor.full_name)
+
+    def test_expenses_are_negative_and_the_rate_is_empty_in_dollars(self):
+        self.make_movement(amount="45.30")
+        Movement.objects.create(
+            family=self.family,
+            category=self.category("Salario"),
+            payment_method=self.payment_method("Efectivo"),
+            amount=Decimal("1234.50"),
+            original_amount=Decimal("493800.00"),
+            original_currency=Currency.objects.get(code="VES"),
+            exchange_rate=Decimal("400.00000000"),
+            date=self.today,
+            description="Quincena",
+            created_by=self.admin,
+        )
+
+        expense, income = self.rows(self.export())[1:]
+
+        self.assertEqual(expense[1:3], ["Gasto", "Alimentación"])
+        self.assertEqual(expense[5:9], ["-45,30", "45,30", "USD", ""])
+        self.assertEqual(income[1:6], ["Ingreso", "Salario", "Quincena", "Efectivo", "1234,50"])
+        self.assertEqual(income[6:9], ["493800,00", "VES", "400,00000000"])
+
+    def test_only_the_family_movements_and_a_session_is_needed(self):
+        self.make_movement(user=self.outsider)
+
+        self.assertEqual(len(self.rows(self.export())), 1)  # solo los encabezados
+        self.assertEqual(self.export(APIClient()).status_code, 401)
+
+    def test_bad_ranges_are_rejected(self):
+        day = datetime.date(2026, 1, 1)
+        year_later = day + datetime.timedelta(days=365)  # 366 días contando los dos
+        self.assertEqual(self.export(start=day, end=year_later).status_code, 200)
+
+        too_long = (year_later + datetime.timedelta(days=1)).isoformat()
+        cases = [
+            ({"from": "2026-01-02", "to": "2026-01-01"}, "to"),  # invertido
+            ({"from": "1999-12-31", "to": "2000-06-01"}, "from"),  # antes del 2000
+            ({"from": day.isoformat(), "to": too_long}, "to"),  # más de 366 días
+            ({"from": "ayer", "to": "2026-01-01"}, "from"),  # mal escrito
+            ({"from": "2026-01-01"}, "to"),  # falta
+        ]
+        for query, field in cases:
+            response = self.client.get("/api/movements/export/", query)
+            self.assertEqual(response.status_code, 400, query)
+            self.assertIn(field, response.json(), query)
+
+    def test_values_that_look_like_formulas_get_an_apostrophe(self):
+        movement = self.make_movement()
+        movement.description = "=HYPERLINK(\"http://x\")"
+        movement.save()
+        category = self.category("Alimentación")
+        category.name = "@Comida"
+        category.save()
+
+        row = self.rows(self.export())[1]
+
+        self.assertEqual(row[3], "'=HYPERLINK(\"http://x\")")
+        self.assertEqual(row[2], "'@Comida")
+        self.assertEqual(row[5], "-10,00")  # el signo de un monto no lleva apóstrofo
+        self.assertEqual(export.text("\t=1+1"), "'\t=1+1")
 
 
 @override_settings(DEBUG=True)  # seed_demo se niega a funcionar sin DEBUG

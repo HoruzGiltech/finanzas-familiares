@@ -40,7 +40,10 @@ function ChangeRow({ item, symbol, up, month }) {
             {changeText(item, symbol)}
           </span>
         </span>
-        <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <ChevronRight
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-muted-foreground print:hidden"
+        />
       </Link>
     </li>
   );

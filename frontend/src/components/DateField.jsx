@@ -16,8 +16,9 @@ export function checkTypedDate(text) {
 
 // Fecha en dd/mm/aaaa (spec 004, ajuste): campo de texto con las barras
 // automáticas, botones Hoy y Ayer, y el calendario del navegador para otro día.
-// `value` es el texto tal como se escribe ("15/10/2026").
-export default function DateField({ value, onChange, error }) {
+// `value` es el texto tal como se escribe ("15/10/2026"). Sin `quickDays`, no
+// hay botones Hoy y Ayer (el rango de la exportación tiene sus propios atajos).
+export default function DateField({ label = "Fecha", value, onChange, error, quickDays = true }) {
   const calendar = useRef(null); // el calendario oculto del navegador
   const [calendarError, setCalendarError] = useState("");
 
@@ -34,7 +35,7 @@ export default function DateField({ value, onChange, error }) {
     <div>
       <div className="flex items-start gap-2">
         <Field
-          label="Fecha"
+          label={label}
           inputMode="numeric" // teclado numérico en el móvil; las barras se ponen solas
           placeholder="dd/mm/aaaa"
           hint="Día/mes/año, por ejemplo 15/10/2026."
@@ -47,13 +48,13 @@ export default function DateField({ value, onChange, error }) {
         {/* Para cualquier otro día: el calendario del navegador. Solo se usa para
             elegir; lo elegido se escribe en el campo como dd/mm/aaaa. El campo
             oculto va junto al botón para que el calendario se abra ahí.
-            mt-6: a la altura del campo, bajo la etiqueta "Fecha". */}
+            mt-6: a la altura del campo, bajo su etiqueta. */}
         <div className="relative mt-6 shrink-0">
           <Button
             variant="secondary"
             icon={CalendarDays}
             onClick={openCalendar}
-            aria-label="Elegir la fecha en el calendario"
+            aria-label={`${label}: elegir en el calendario`}
             className="min-w-11"
           >
             {/* En móvil solo el icono, para que quepa junto al campo. */}
@@ -71,22 +72,24 @@ export default function DateField({ value, onChange, error }) {
           />
         </div>
       </div>
-      <div className="mt-2 flex gap-2">
-        {[
-          ["Hoy", today()],
-          ["Ayer", shiftDay(today(), -1)],
-        ].map(([label, date]) => (
-          <Button
-            key={label}
-            variant="secondary"
-            aria-pressed={value === toTypedDate(date)}
-            onClick={() => onChange(toTypedDate(date))}
-            className="aria-pressed:border-primary aria-pressed:text-primary"
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+      {quickDays && (
+        <div className="mt-2 flex gap-2">
+          {[
+            ["Hoy", today()],
+            ["Ayer", shiftDay(today(), -1)],
+          ].map(([label, date]) => (
+            <Button
+              key={label}
+              variant="secondary"
+              aria-pressed={value === toTypedDate(date)}
+              onClick={() => onChange(toTypedDate(date))}
+              className="aria-pressed:border-primary aria-pressed:text-primary"
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

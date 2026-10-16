@@ -46,7 +46,7 @@ export default function ColumnChart({ title, label, columns, initial, symbol, ta
         <button
           type="button"
           onClick={() => setAsTable(!asTable)}
-          className="-mr-2 min-h-11 shrink-0 cursor-pointer rounded-lg px-2 text-sm font-semibold whitespace-nowrap text-primary transition-colors duration-150 hover:bg-primary-soft"
+          className="-mr-2 min-h-11 shrink-0 cursor-pointer rounded-lg px-2 text-sm font-semibold whitespace-nowrap text-primary transition-colors duration-150 hover:bg-primary-soft print:hidden"
         >
           {asTable ? "Ver como gráfico" : "Ver como tabla"}
         </button>
@@ -164,7 +164,7 @@ export default function ColumnChart({ title, label, columns, initial, symbol, ta
           {/* aria-live: al elegir otra columna, el lector de pantalla lo anuncia. */}
           <p
             aria-live="polite"
-            className="mt-2 min-h-11 rounded-lg bg-muted/60 px-3 py-2.5 text-sm"
+            className="mt-2 min-h-11 rounded-lg bg-muted/60 px-3 py-2.5 text-sm print:hidden"
           >
             {columns[selected].text}
           </p>

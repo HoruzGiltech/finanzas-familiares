@@ -183,7 +183,7 @@ solo esas variables, nunca colores sueltos.
 | 005 | Tasas BCV y vista en USD, bolívares y euros | Implementada |
 | 006 | Dashboard interactivo | Implementada |
 | 007 | Comparación contra meses anteriores | Implementada |
-| 008 | Exportación a CSV y dashboard a PDF | Pendiente |
+| 008 | Exportación a CSV y dashboard a PDF | Implementada |
 | 009 | Borrar categorías y métodos de pago sin movimientos | Implementada |
 | 010 | Presupuesto mensual | Implementada |
 

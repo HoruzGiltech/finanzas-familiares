@@ -63,6 +63,28 @@ export const apiPost = (path, body) => request("POST", path, body);
 export const apiPatch = (path, body) => request("PATCH", path, body);
 export const apiDelete = (path) => request("DELETE", path);
 
+// Descarga un archivo (el CSV de movimientos) con el nombre `filename`.
+// Devuelve { ok, status, data }: si falla, `data` trae los errores de la API.
+export async function apiDownload(path, filename) {
+  const response = await send(path);
+  if (response.status === 429) {
+    throw new Error("Demasiados intentos. Espera un minuto e inténtalo de nuevo.");
+  }
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    return { ok: false, status: response.status, data };
+  }
+  // El archivo llega por fetch (con la cookie de sesión); un enlace temporal
+  // hace que el navegador lo guarde como cualquier descarga.
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { ok: true, status: response.status, data: null };
+}
+
 // Convierte la respuesta de error de la API en algo cómodo para un formulario:
 //   { fields: { email: "Ya existe..." }, general: "Mensaje que no es de un campo" }
 export function readErrors(data) {

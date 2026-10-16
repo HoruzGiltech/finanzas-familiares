@@ -53,7 +53,10 @@ export default function BarList({ items, symbol, noun, linkTo }) {
               <span className="flex shrink-0 items-center gap-1 font-semibold whitespace-nowrap tabular-nums">
                 {money}
                 {href && (
-                  <ChevronRight aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="h-4 w-4 text-muted-foreground print:hidden"
+                  />
                 )}
               </span>
             </span>

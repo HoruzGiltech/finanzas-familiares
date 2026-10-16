@@ -1,4 +1,4 @@
-import { Plus, Scale, TrendingDown, TrendingUp, Wallet, X } from "lucide-react";
+import { Download, Plus, Scale, TrendingDown, TrendingUp, Wallet, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -9,6 +9,7 @@ import Alert from "../components/Alert.jsx";
 import Button from "../components/Button.jsx";
 import Card from "../components/Card.jsx";
 import CurrencyPicker from "../components/CurrencyPicker.jsx";
+import ExportForm from "../components/ExportForm.jsx";
 import Modal from "../components/Modal.jsx";
 import MonthPicker from "../components/MonthPicker.jsx";
 import MovementForm from "../components/MovementForm.jsx";
@@ -50,6 +51,7 @@ export default function Movements() {
   const [reloads, setReloads] = useState(0); // sube para volver a pedir el mes
 
   const [formOpen, setFormOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [editing, setEditing] = useState(null); // movimiento que se corrige
   const [deleting, setDeleting] = useState(null); // movimiento que se va a borrar
   const [deleteError, setDeleteError] = useState("");
@@ -183,11 +185,17 @@ export default function Movements() {
           <h1 className="text-2xl font-bold">Movimientos</h1>
           <p className="mt-1 text-muted-foreground">Ingresos y gastos de tu familia, mes a mes.</p>
         </div>
-        {canAdd && catalogs && (
-          <Button icon={Plus} className="max-sm:hidden" onClick={() => openForm()}>
-            Registrar movimiento
+        <div className="flex shrink-0 gap-2">
+          {/* Cualquier miembro exporta, también el lector (spec 008). */}
+          <Button variant="secondary" icon={Download} onClick={() => setExportOpen(true)}>
+            Exportar
           </Button>
-        )}
+          {canAdd && catalogs && (
+            <Button icon={Plus} className="max-sm:hidden" onClick={() => openForm()}>
+              Registrar movimiento
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row">
@@ -345,6 +353,18 @@ export default function Movements() {
               defaultCurrency={currency}
               onSaved={handleSaved}
               onCancel={() => setFormOpen(false)}
+            />
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {exportOpen && (
+          <Modal title="Exportar movimientos" onClose={() => setExportOpen(false)}>
+            <ExportForm
+              month={month}
+              onDone={() => setExportOpen(false)}
+              onCancel={() => setExportOpen(false)}
             />
           </Modal>
         )}

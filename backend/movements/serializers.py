@@ -190,3 +190,27 @@ class MovementFilterSerializer(serializers.Serializer):
         required=False,
         error_messages={"does_not_exist": "Elige una moneda activa."},
     )
+
+
+class ExportFilterSerializer(serializers.Serializer):
+    """Rango del CSV: ?from=2026-10-01&to=2026-10-31 (spec 008)."""
+
+    MAX_DAYS = 366
+
+    def get_fields(self):
+        # "from" es palabra reservada en Python: los campos se declaran aquí.
+        errors = {"required": "Elige la fecha.", "invalid": "Escribe la fecha como aaaa-mm-dd."}
+        return {
+            "from": serializers.DateField(error_messages=errors),
+            "to": serializers.DateField(error_messages=errors),
+        }
+
+    def validate(self, attrs):
+        start, end = attrs["from"], attrs["to"]
+        if start < MIN_DATE:
+            raise serializers.ValidationError({"from": ["No puede ser anterior al año 2000."]})
+        if start > end:
+            raise serializers.ValidationError({"to": ["Debe ser igual o posterior a «Desde»."]})
+        if (end - start).days + 1 > self.MAX_DAYS:
+            raise serializers.ValidationError({"to": ["El rango es de un año como máximo."]})
+        return attrs

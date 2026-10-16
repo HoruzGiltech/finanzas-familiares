@@ -58,7 +58,9 @@ export default function App() {
       {user && <Header />}
 
       {/* pb-24 en móvil: deja sitio para la barra de navegación inferior. */}
-      <main className={`mx-auto max-w-4xl px-4 py-6 ${user ? "pb-24 sm:pb-6" : ""}`}>
+      <main
+        className={`mx-auto max-w-4xl px-4 py-6 print:max-w-none print:p-0 ${user ? "pb-24 sm:pb-6" : ""}`}
+      >
         {/* mode="wait": la página que sale termina antes de que entre la nueva. */}
         <AnimatePresence mode="wait">
           <motion.div

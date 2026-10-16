@@ -10,5 +10,6 @@ urlpatterns = [
         views.MovementComparisonView.as_view(),
         name="movement-comparison",
     ),
+    path("movements/export/", views.MovementExportView.as_view(), name="movement-export"),
     path("movements/<int:movement_id>/", views.MovementDetailView.as_view(), name="movement"),
 ]
