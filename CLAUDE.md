@@ -196,6 +196,7 @@ solo esas variables, nunca colores sueltos.
 | 011 | Presupuesto compacto y lista del supermercado | Implementada |
 | 012 | Despliegue en Vercel y Railway | Aprobada |
 | 013 | Peso chileno y moneda para anotar | Implementada |
+| 014 | Icono de la aplicación | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 
