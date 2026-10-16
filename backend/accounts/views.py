@@ -134,7 +134,7 @@ class ChangePasswordView(APIView):
 
 
 class FamilyView(APIView):
-    """El administrador cambia la moneda para anotar de su familia (spec 013).
+    """El administrador cambia las monedas para anotar y para ver (specs 013 y 015).
 
     Para leerla no hace falta esta vista: viene con el usuario en auth/me/.
     """
@@ -145,8 +145,9 @@ class FamilyView(APIView):
         serializer = FamilyUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         family = request.user.family
-        family.entry_currency = serializer.validated_data["entry_currency"]
-        family.save(update_fields=["entry_currency"])
+        for field, currency in serializer.validated_data.items():
+            setattr(family, field, currency)
+        family.save(update_fields=list(serializer.validated_data))
         return Response(FamilySerializer(family).data)
 
 

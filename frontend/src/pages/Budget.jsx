@@ -186,7 +186,7 @@ export default function Budget() {
   const canEdit = user.role !== "viewer";
 
   const [month, setMonth] = useState(currentMonth());
-  const [currency, setCurrency] = useState(savedCurrency);
+  const [currency, setCurrency] = useState(() => savedCurrency(user.family.view_currency));
   const [catalogs, setCatalogs] = useState(null);
   const [data, setData] = useState(null); // null = cargando el mes
   const [loadError, setLoadError] = useState("");
@@ -246,7 +246,7 @@ export default function Budget() {
   function changeCurrency(code) {
     setData(null);
     setCurrency(code);
-    saveCurrency(code);
+    saveCurrency(code, user.family.view_currency);
   }
 
   function reload() {

@@ -1,5 +1,9 @@
-// La moneda en que se ven los montos. La comparten Inicio y Movimientos y se
-// recuerda en este dispositivo (specs 005 y 006).
+// La moneda en que se ven los montos. La comparten Inicio, Movimientos y
+// Presupuesto y se recuerda en este dispositivo (specs 005 y 006).
+//
+// Spec 015: sin elección propia se ve la moneda para ver de la familia. La
+// elección se guarda junto con la moneda de la familia que regía al hacerla:
+// si el administrador la cambia después, la elección vieja se descarta.
 
 import { rememberDecimals } from "./format.js";
 import { canUse } from "./rates.js";
@@ -9,18 +13,21 @@ export const BASE = "USD";
 const CURRENCY_KEY = "movements-currency";
 
 // localStorage puede fallar (navegación privada, almacenamiento bloqueado):
-// entonces, dólares.
-export function savedCurrency() {
+// entonces, la moneda de la familia.
+export function savedCurrency(familyCurrency) {
   try {
-    return localStorage.getItem(CURRENCY_KEY) || BASE;
+    const saved = JSON.parse(localStorage.getItem(CURRENCY_KEY));
+    return saved?.family === familyCurrency ? saved.code : familyCurrency;
   } catch {
-    return BASE;
+    // También llega aquí lo guardado antes de la spec 015 ("VES", sin JSON):
+    // se descarta y se empieza con la moneda de la familia.
+    return familyCurrency;
   }
 }
 
-export function saveCurrency(code) {
+export function saveCurrency(code, familyCurrency) {
   try {
-    localStorage.setItem(CURRENCY_KEY, code);
+    localStorage.setItem(CURRENCY_KEY, JSON.stringify({ code, family: familyCurrency }));
   } catch {
     // Sin almacenamiento solo se pierde el recuerdo; la pantalla sigue igual.
   }

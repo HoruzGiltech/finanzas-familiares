@@ -142,8 +142,9 @@ solo esas variables, nunca colores sueltos.
 - El peso chileno (spec 013) se guarda en `UsdQuote` (pesos por 1 USD, de
   mindicador.cl y, de respaldo, open.er-api.com) y se pasa a bolívares con el
   dólar del BCV. `Currency.decimals` dice cuántos decimales lleva cada moneda.
-  `Family.entry_currency` es la moneda con que empiezan los formularios; solo
-  la cambia el administrador (`PATCH /api/family/`).
+  `Family.entry_currency` es la moneda con que empiezan los formularios y
+  `Family.view_currency` (spec 015) la moneda en que se ven por defecto; solo
+  las cambia el administrador (`PATCH /api/family/`).
 - Presupuesto en la app `budget` (spec 010): `BudgetItem` en USD; realizada
   cuando tiene un movimiento enlazado (`SET_NULL`: si se borra, vuelve a
   pendiente). Mismo permiso que movimientos, pero cualquier editor toca
@@ -197,6 +198,7 @@ solo esas variables, nunca colores sueltos.
 | 012 | Despliegue en Vercel y Railway | Aprobada |
 | 013 | Peso chileno y moneda para anotar | Implementada |
 | 014 | Icono de la aplicación | Implementada |
+| 015 | Moneda para ver de la familia | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 

@@ -24,20 +24,33 @@ def clean_new_email(value):
 
 class FamilySerializer(serializers.ModelSerializer):
     entry_currency = serializers.SlugRelatedField(slug_field="code", read_only=True)
+    view_currency = serializers.SlugRelatedField(slug_field="code", read_only=True)
 
     class Meta:
         model = Family
-        fields = ["id", "name", "entry_currency"]
+        fields = ["id", "name", "entry_currency", "view_currency"]
+
+
+def active_currency_field():
+    return serializers.SlugRelatedField(
+        slug_field="code",
+        queryset=Currency.objects.filter(is_active=True),
+        required=False,
+        error_messages={"does_not_exist": "Elige una moneda activa."},
+    )
 
 
 class FamilyUpdateSerializer(serializers.Serializer):
-    """Lo que el administrador puede cambiar de su familia (spec 013)."""
+    """Lo que el administrador puede cambiar de su familia: la moneda para
+    anotar (spec 013) y la moneda para ver (spec 015). Una o las dos."""
 
-    entry_currency = serializers.SlugRelatedField(
-        slug_field="code",
-        queryset=Currency.objects.filter(is_active=True),
-        error_messages={"does_not_exist": "Elige una moneda activa."},
-    )
+    entry_currency = active_currency_field()
+    view_currency = active_currency_field()
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Indica qué moneda quieres cambiar.")
+        return attrs
 
 
 class UserSerializer(serializers.ModelSerializer):

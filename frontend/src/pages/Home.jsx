@@ -255,7 +255,7 @@ export default function Home() {
   const firstName = user.full_name.split(" ")[0];
 
   const [month, setMonth] = useState(currentMonth());
-  const [currency, setCurrency] = useState(savedCurrency);
+  const [currency, setCurrency] = useState(() => savedCurrency(user.family.view_currency));
   const [catalogs, setCatalogs] = useState(null);
   const [data, setData] = useState(null); // null = cargando el mes
   const [loadError, setLoadError] = useState("");
@@ -318,7 +318,7 @@ export default function Home() {
   function changeCurrency(code) {
     setData(null);
     setCurrency(code);
-    saveCurrency(code);
+    saveCurrency(code, user.family.view_currency);
   }
 
   // "Descargar PDF": el diálogo de imprimir del navegador, donde se elige

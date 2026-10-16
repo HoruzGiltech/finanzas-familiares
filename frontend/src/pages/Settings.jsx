@@ -39,7 +39,7 @@ export default function Settings() {
   const { user, setUser } = useAuth();
   const [catalogs, setCatalogs] = useState(null); // null = cargando
   const [loadError, setLoadError] = useState("");
-  const [entryError, setEntryError] = useState("");
+  const [familyError, setFamilyError] = useState("");
 
   useEffect(() => {
     apiGet("/catalogs/?include_inactive=1")
@@ -53,18 +53,25 @@ export default function Settings() {
       .catch((err) => setLoadError(err.message));
   }, []);
 
-  // --- Moneda para anotar (spec 013) ---
+  // --- Monedas para anotar (spec 013) y para ver (spec 015) ---
 
-  async function changeEntryCurrency(code) {
-    setEntryError("");
-    const { data, error } = await save(() => apiPatch("/family/", { entry_currency: code }));
+  // `field`: "entry_currency" o "view_currency".
+  async function changeFamilyCurrency(field, code) {
+    setFamilyError("");
+    const { data, error } = await save(() => apiPatch("/family/", { [field]: code }));
     if (data) {
-      // La familia viaja con el usuario: así los formularios ven la nueva moneda.
+      // La familia viaja con el usuario: así formularios y páginas ven la nueva moneda.
       setUser((current) => ({ ...current, family: data }));
     } else {
-      setEntryError(error);
+      setFamilyError(error);
     }
   }
+
+  const currencyOptions = (catalogs?.currencies ?? []).map((currency) => ({
+    value: currency.code,
+    label: currency.symbol,
+    ariaLabel: currency.name,
+  }));
 
   // --- Categorías ---
 
@@ -251,16 +258,26 @@ export default function Settings() {
                 </p>
                 <SegmentedControl
                   label="Moneda para anotar"
-                  options={catalogs.currencies.map((currency) => ({
-                    value: currency.code,
-                    label: currency.symbol,
-                    ariaLabel: currency.name,
-                  }))}
+                  options={currencyOptions}
                   value={user.family.entry_currency}
-                  onChange={changeEntryCurrency}
+                  onChange={(code) => changeFamilyCurrency("entry_currency", code)}
                   className="mt-3 sm:max-w-sm"
                 />
-                {entryError && <Alert className="mt-3">{entryError}</Alert>}
+              </div>
+              <div className="mt-4 border-t border-border pt-4">
+                <h3 className="font-semibold">Moneda para ver</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Inicio, Movimientos y Presupuesto se abren en esta moneda para toda la familia.
+                  Cada persona puede cambiarla en su dispositivo hasta que la cambies aquí otra vez.
+                </p>
+                <SegmentedControl
+                  label="Moneda para ver"
+                  options={currencyOptions}
+                  value={user.family.view_currency}
+                  onChange={(code) => changeFamilyCurrency("view_currency", code)}
+                  className="mt-3 sm:max-w-sm"
+                />
+                {familyError && <Alert className="mt-3">{familyError}</Alert>}
               </div>
             </Card>
           </motion.div>

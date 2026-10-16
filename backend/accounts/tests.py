@@ -153,15 +153,61 @@ class EntryCurrencyTests(BaseTestCase):
     def test_only_active_currencies(self):
         Currency.objects.filter(code="EUR").update(is_active=False)
 
-        for code in ("EUR", "XXX", ""):
+        for code in ("EUR", "XXX"):
             with self.subTest(code=code):
                 response = self.change(self.admin, code)
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("entry_currency", response.json())
+        # Vacío: no se cambia nada y se avisa (spec 015).
+        self.assertEqual(self.change(self.admin, "").status_code, 400)
 
     def test_needs_a_session(self):
         response = self.client.patch("/api/family/", {"entry_currency": "CLP"})
         self.assertEqual(response.status_code, 401)
+
+
+class ViewCurrencyTests(BaseTestCase):
+    """La moneda para ver de la familia (spec 015)."""
+
+    def change(self, user, data):
+        self.client.force_login(user)
+        return self.client.patch("/api/family/", data)
+
+    def test_a_new_family_sees_dollars(self):
+        self.client.force_login(self.viewer)
+
+        family = self.client.get("/api/auth/me/").json()["family"]
+
+        self.assertEqual(family["view_currency"], "USD")
+
+    def test_the_admin_changes_it_without_touching_the_entry_currency(self):
+        response = self.change(self.admin, {"view_currency": "CLP"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["view_currency"], "CLP")
+        self.assertEqual(response.json()["entry_currency"], "USD")
+
+    def test_both_at_once(self):
+        response = self.change(self.admin, {"view_currency": "EUR", "entry_currency": "CLP"})
+
+        self.family.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.family.view_currency.code, "EUR")
+        self.assertEqual(self.family.entry_currency.code, "CLP")
+
+    def test_editors_and_viewers_cannot_change_it(self):
+        for user in (self.editor, self.viewer):
+            with self.subTest(user=user.email):
+                self.assertEqual(self.change(user, {"view_currency": "CLP"}).status_code, 403)
+        self.family.refresh_from_db()
+        self.assertEqual(self.family.view_currency.code, "USD")
+
+    def test_bad_requests(self):
+        Currency.objects.filter(code="EUR").update(is_active=False)
+
+        for data in ({}, {"view_currency": "EUR"}, {"view_currency": "XXX"}):
+            with self.subTest(data=data):
+                self.assertEqual(self.change(self.admin, data).status_code, 400)
 
 
 class MemberTests(BaseTestCase):

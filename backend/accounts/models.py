@@ -18,6 +18,11 @@ class Family(models.Model):
     entry_currency = models.ForeignKey(
         "catalogs.Currency", on_delete=models.PROTECT, default=base_currency_id, related_name="+"
     )
+    # La moneda en que la familia ve sus montos por defecto (spec 015). Solo
+    # cambia cómo se muestran: se convierten desde USD con la tasa de hoy.
+    view_currency = models.ForeignKey(
+        "catalogs.Currency", on_delete=models.PROTECT, default=base_currency_id, related_name="+"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
