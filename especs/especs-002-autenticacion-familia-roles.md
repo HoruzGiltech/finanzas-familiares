@@ -267,3 +267,17 @@ Animaciones, siempre con los valores de `lib/motion.js`:
    familia nueva. Si prefieres que solo exista tu familia, el registro se
    cierra tras crear la primera.
 7. **Inicio de sesión con correo**, no con nombre de usuario.
+
+## 7. Ajustes posteriores
+
+### 7.1 Ver la contraseña al escribirla (16/10/2026)
+
+Pedido tras desplegar. Todo campo de contraseña (entrar, registro y cambiar
+contraseña) lleva dentro, a la derecha, un botón con un ojo que alterna entre
+ocultar y mostrar lo que se escribe. Lo hace el componente `Field` cuando
+recibe `type="password"`, así que cualquier campo de contraseña futuro lo tiene
+solo.
+
+- Empieza oculta.
+- Botón de 44 × 44 px, con `aria-label` "Mostrar contraseña" u "Ocultar
+  contraseña" y `aria-pressed`.
