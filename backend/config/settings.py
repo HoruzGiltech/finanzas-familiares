@@ -45,6 +45,10 @@ SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 60 * 60 * 24 * 14
 SESSION_SAVE_EVERY_REQUEST = True
 
+# En producción (Railway) Django recibe por HTTP lo que llegó por HTTPS; el
+# proxy lo indica en esta cabecera (spec 012).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # Respuesta en JSON cuando falta o no coincide el token CSRF.
 CSRF_FAILURE_VIEW = "core.views.csrf_failure"
 
@@ -70,6 +74,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Sirve los estilos del panel /admin cuando DEBUG=False (spec 012).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",  # debe ir antes de CommonMiddleware
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -170,6 +176,12 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Donde `collectstatic` reúne los archivos que sirve whitenoise.
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+}
 
 
 # --- Solo durante las pruebas ----------------------------------------------

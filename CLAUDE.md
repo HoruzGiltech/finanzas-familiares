@@ -189,6 +189,7 @@ solo esas variables, nunca colores sueltos.
 | 009 | Borrar categorías y métodos de pago sin movimientos | Implementada |
 | 010 | Presupuesto mensual | Implementada |
 | 011 | Presupuesto compacto y lista del supermercado | Implementada |
+| 012 | Despliegue en Vercel y Railway | Aprobada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 
