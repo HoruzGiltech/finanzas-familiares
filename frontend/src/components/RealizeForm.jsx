@@ -1,12 +1,14 @@
 import { useState } from "react";
 
+import { useAuth } from "../auth/AuthContext.jsx";
 import { apiPost, readErrors } from "../lib/api.js";
+import { currencyDecimals, entryCurrency } from "../lib/currency.js";
 import { daysOfMonth, formatMoney, toTypedDate, today } from "../lib/format.js";
 import { toOptions } from "../lib/options.js";
-import { canUse } from "../lib/rates.js";
+import { approxConvert, canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
 import Alert from "./Alert.jsx";
-import AmountField, { amountForApi } from "./AmountField.jsx";
+import AmountField, { amountForApi, amountForInput } from "./AmountField.jsx";
 import Button from "./Button.jsx";
 import DateField, { checkTypedDate } from "./DateField.jsx";
 import Field from "./Field.jsx";
@@ -29,10 +31,19 @@ export default function RealizeForm({
   onSaved,
   onCancel,
 }) {
+  const { user } = useAuth();
+  const decimalsOf = (code) => currencyDecimals(catalogs.currencies, code);
   const currencyOk = canUse(viewCurrency, rate);
+  // Empieza en la moneda para anotar de la familia (spec 013), con el monto
+  // previsto pasado a ella de forma aproximada: la persona lo confirma.
+  const startCurrency = currencyOk ? entryCurrency(user, rate) : "USD";
+  const startAmount =
+    currencyOk && startCurrency !== viewCurrency
+      ? approxConvert(Number(item.amount), viewCurrency, startCurrency, rate)
+      : item.amount;
   const [paymentMethod, setPaymentMethod] = useState("");
-  const [amount, setAmount] = useState(item.amount.replace(".", ","));
-  const [currency, setCurrency] = useState(currencyOk ? viewCurrency : "USD");
+  const [amount, setAmount] = useState(amountForInput(startAmount, decimalsOf(startCurrency)));
+  const [currency, setCurrency] = useState(startCurrency);
   const [date, setDate] = useState(toTypedDate(startDate(item.month)));
   const [fieldErrors, setFieldErrors] = useState({});
   const [generalError, setGeneralError] = useState("");
@@ -55,7 +66,7 @@ export default function RealizeForm({
     try {
       const { ok, data } = await apiPost(`/budget/items/${item.id}/realize/`, {
         payment_method: Number(paymentMethod),
-        amount: amountForApi(amount),
+        amount: amountForApi(amount, decimalsOf(currency)),
         currency,
         date: checked.date,
       });

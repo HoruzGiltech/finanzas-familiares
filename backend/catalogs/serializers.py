@@ -17,7 +17,7 @@ class MovementTypeSerializer(serializers.ModelSerializer):
 class CurrencySerializer(serializers.ModelSerializer):
     class Meta:
         model = Currency
-        fields = ["id", "code", "name", "symbol", "is_base"]
+        fields = ["id", "code", "name", "symbol", "is_base", "decimals"]
 
 
 class CategorySerializer(serializers.ModelSerializer):

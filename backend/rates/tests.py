@@ -14,8 +14,8 @@ from accounts.models import Family, User
 from catalogs.models import Currency
 
 from . import services
-from .models import ExchangeRate
-from .sources import EXTRA_INTERMEDIATE, SourceError, parse_bcv_page
+from .models import ExchangeRate, UsdQuote
+from .sources import EXTRA_INTERMEDIATE, SourceError, parse_bcv_page, read_clp, read_clp_backup
 
 BCV_PAGE = Path(__file__).parent / "test_data" / "bcv_page.html"
 
@@ -44,9 +44,13 @@ class RatesTestCase(TestCase):
         self.read_bcv = self.patch("rates.sources.read_bcv")
         self.read_history = self.patch("rates.sources.read_history")
         self.patch("rates.services.logger")  # los avisos de fallo no ensucian la salida
-        # Por defecto, las dos fuentes están caídas.
+        self.read_clp = self.patch("rates.sources.read_clp")
+        self.read_clp_backup = self.patch("rates.sources.read_clp_backup")
+        # Por defecto, todas las fuentes están caídas.
         self.read_bcv.side_effect = SourceError("BCV caído")
         self.read_history.side_effect = SourceError("DolarAPI caído")
+        self.read_clp.side_effect = SourceError("mindicador caído")
+        self.read_clp_backup.side_effect = SourceError("er-api caído")
 
     def patch(self, target, **kwargs):
         patcher = mock.patch(target, **kwargs)
@@ -237,13 +241,151 @@ class FetchCommandTests(RatesTestCase):
         self.bcv_publishes(WEDNESDAY)
         services.today_rate()
 
-        call_command("fetch_bcv_rates", stdout=mock.Mock())
+        call_command("fetch_bcv_rates", stdout=mock.Mock(), stderr=mock.Mock())
 
         self.assertEqual(self.read_bcv.call_count, 2)
 
     def test_fails_loudly_when_the_bcv_does_not_answer(self):
         with self.assertRaises(CommandError):
-            call_command("fetch_bcv_rates", stdout=mock.Mock())
+            call_command("fetch_bcv_rates", stdout=mock.Mock(), stderr=mock.Mock())
+
+
+class ChileanPesoSourceTests(TestCase):
+    """Lectura de mindicador.cl y de open.er-api.com con respuestas guardadas (spec 013)."""
+
+    def answer(self, data):
+        response = mock.Mock()
+        response.json.return_value = data
+        return mock.patch("rates.sources.download", return_value=response)
+
+    def test_reads_the_observed_dollar_by_day(self):
+        data = {
+            "serie": [
+                {"fecha": "2026-10-14T03:00:00.000Z", "valor": 980.79},
+                {"fecha": "2026-10-13T03:00:00.000Z", "valor": 978.61},
+            ]
+        }
+        with self.answer(data):
+            quotes = read_clp()
+        self.assertEqual(quotes, {WEDNESDAY: Decimal("980.79"), TUESDAY: Decimal("978.61")})
+
+    def test_reads_the_backup_with_the_date_in_caracas(self):
+        # 00:02 UTC del 15 de octubre son las 20:02 del 14 en Caracas.
+        data = {"time_last_update_unix": 1792022551, "rates": {"CLP": 985.501337}}
+        with self.answer(data):
+            date, value = read_clp_backup()
+        self.assertEqual(date, WEDNESDAY)
+        self.assertEqual(value, Decimal("985.501337"))
+
+    def test_strange_answers_are_errors(self):
+        cases = [
+            (read_clp, {"serie": []}),
+            (read_clp, {"serie": [{"fecha": "ayer", "valor": 980}]}),
+            (read_clp, {"serie": [{"fecha": "2026-10-14T03:00:00.000Z", "valor": 0}]}),
+            (read_clp_backup, {"rates": {"EUR": 0.9}}),
+            (read_clp_backup, {"time_last_update_unix": 1792022551, "rates": {"CLP": "x"}}),
+        ]
+        for reader, data in cases:
+            with self.subTest(data=data), self.answer(data), self.assertRaises(SourceError):
+                reader()
+
+
+class ChileanPesoTests(RatesTestCase):
+    """El peso pasa a bolívares con el dólar del BCV (spec 013, sección 2.1)."""
+
+    def setUp(self):
+        super().setUp()
+        self.store(WEDNESDAY, "877.90", "982.76")
+        self.on_day(WEDNESDAY)
+        self.clp = Currency.objects.get(code="CLP")
+
+    def mindicador_has(self, quotes):
+        self.read_clp.side_effect = None
+        self.read_clp.return_value = {day: Decimal(value) for day, value in quotes.items()}
+
+    def backup_has(self, day, value):
+        self.read_clp_backup.side_effect = None
+        self.read_clp_backup.return_value = (day, Decimal(value))
+
+    def quote(self, day):
+        return UsdQuote.objects.get(currency=self.clp, date=day)
+
+    def test_the_peso_goes_through_the_bcv_dollar(self):
+        self.mindicador_has({WEDNESDAY: "984.09", TUESDAY: "980.00"})
+
+        rate = services.today_rate()
+
+        # 877,90 / 984,09
+        self.assertEqual(rate.bs_per_unit["CLP"], Decimal("0.89209320"))
+        self.assertEqual(rate.to_usd(Decimal("50000"), "CLP"), Decimal("50.81"))
+        self.assertEqual(rate.from_usd(Decimal("10.00"), "CLP"), Decimal("9840.90"))
+        self.assertEqual(UsdQuote.objects.count(), 2)  # también guarda el histórico
+        self.read_clp_backup.assert_not_called()
+
+    def test_it_is_read_once_a_day(self):
+        self.mindicador_has({WEDNESDAY: "984.09"})
+
+        services.today_rate()
+        services.today_rate()
+
+        self.assertEqual(self.read_clp.call_count, 1)
+
+    def test_if_mindicador_fails_the_backup_is_saved_and_mindicador_retried_later(self):
+        self.backup_has(WEDNESDAY, "985.50")
+
+        rate = services.today_rate()
+        services.today_rate()
+
+        self.assertEqual(rate.quotes["CLP"].source, UsdQuote.ER_API)
+        self.assertEqual(rate.quotes["CLP"].units_per_usd, Decimal("985.50"))
+        self.assertEqual(self.read_clp.call_count, 1)  # pausa de 15 minutos
+
+        cache.clear()  # pasaron los 15 minutos y mindicador volvió
+        self.mindicador_has({WEDNESDAY: "984.09"})
+        rate = services.today_rate()
+        self.assertEqual(rate.quotes["CLP"].source, UsdQuote.MINDICADOR)
+        self.assertEqual(self.quote(WEDNESDAY).units_per_usd, Decimal("984.09"))
+
+    def test_the_backup_never_overwrites_the_observed_dollar(self):
+        UsdQuote.objects.create(
+            currency=self.clp,
+            date=WEDNESDAY,
+            units_per_usd=Decimal("984.09"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=at_noon(TUESDAY),  # leída ayer: hoy toca volver a leer
+        )
+        self.backup_has(WEDNESDAY, "985.50")
+
+        services.today_rate()
+
+        self.assertEqual(self.quote(WEDNESDAY).units_per_usd, Decimal("984.09"))
+
+    def test_if_both_fail_the_last_saved_rate_is_used(self):
+        UsdQuote.objects.create(
+            currency=self.clp,
+            date=TUESDAY,
+            units_per_usd=Decimal("980.00"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=at_noon(TUESDAY),
+        )
+
+        rate = services.today_rate()
+
+        self.assertEqual(rate.quotes["CLP"].date, TUESDAY)
+        self.assertIn("CLP", rate.bs_per_unit)
+
+    def test_tomorrows_peso_is_not_used_yet(self):
+        self.mindicador_has({THURSDAY + datetime.timedelta(days=7): "990.00"})
+
+        rate = services.today_rate()
+
+        self.assertNotIn("CLP", rate.bs_per_unit)
+
+    def test_without_any_peso_rate_the_rest_still_works(self):
+        rate = services.today_rate()
+
+        self.assertNotIn("CLP", rate.bs_per_unit)
+        self.assertEqual(rate.bs_per_unit["USD"], Decimal("877.90"))
 
 
 class CurrentRateApiTests(RatesTestCase):

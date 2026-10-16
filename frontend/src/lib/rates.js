@@ -23,15 +23,30 @@ export function canUse(code, rate) {
 
 // Monto en la moneda `code` -> dólares, aproximado.
 export function approxUsd(amount, code, rate) {
+  return approxConvert(amount, code, BASE, rate);
+}
+
+// Monto en la moneda `from` -> moneda `to`, aproximado. Sirve también para
+// proponer un monto en otra moneda; el que vale es el que la persona confirma.
+export function approxConvert(amount, from, to, rate) {
   const values = bsPerUnit(rate);
-  return (amount * values[code]) / values[BASE];
+  return (amount * values[from]) / values[to];
+}
+
+// Las monedas cotizadas contra el dólar (el peso chileno, spec 013) se
+// muestran como "1 $ = CLP$ 984,09", con su fecha si no es la del BCV.
+function quoteSummary(item, rate, symbols) {
+  const text = `1 ${symbols[BASE]} = ${formatMoney(item.units_per_usd, symbols[item.currency], "", 2)}`;
+  return item.date === rate.date ? text : `${text} (del ${formatDay(item.date).toLowerCase()})`;
 }
 
 // "1 $ = Bs. 877,90 · 1 € = Bs. 982,76". `symbols` = { USD: "$", ... } del catálogo.
 export function rateSummary(rate, symbols) {
   return rate.rates
-    .map(
-      (item) => `1 ${symbols[item.currency]} = ${formatMoney(item.bs_per_unit, symbols[BOLIVAR])}`,
+    .map((item) =>
+      item.units_per_usd
+        ? quoteSummary(item, rate, symbols)
+        : `1 ${symbols[item.currency]} = ${formatMoney(item.bs_per_unit, symbols[BOLIVAR])}`,
     )
     .join(" · ");
 }

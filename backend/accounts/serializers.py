@@ -2,6 +2,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from catalogs.models import Currency
+
 from .models import Family, User
 
 
@@ -21,9 +23,21 @@ def clean_new_email(value):
 
 
 class FamilySerializer(serializers.ModelSerializer):
+    entry_currency = serializers.SlugRelatedField(slug_field="code", read_only=True)
+
     class Meta:
         model = Family
-        fields = ["id", "name"]
+        fields = ["id", "name", "entry_currency"]
+
+
+class FamilyUpdateSerializer(serializers.Serializer):
+    """Lo que el administrador puede cambiar de su familia (spec 013)."""
+
+    entry_currency = serializers.SlugRelatedField(
+        slug_field="code",
+        queryset=Currency.objects.filter(is_active=True),
+        error_messages={"does_not_exist": "Elige una moneda activa."},
+    )
 
 
 class UserSerializer(serializers.ModelSerializer):

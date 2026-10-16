@@ -4,7 +4,7 @@ faltan y cómo se convierte entre monedas (spec 005).
 """
 import datetime
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.cache import cache
@@ -14,7 +14,7 @@ from django.utils import timezone
 from catalogs.models import Currency
 
 from . import sources
-from .models import ExchangeRate
+from .models import ExchangeRate, UsdQuote
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,12 @@ FILL_FAILED_KEY = "rates:fill-failed"
 
 NO_RATE_MESSAGE = "Todavía no hay tasa del BCV; usa dólares."
 
+# Peso chileno (spec 013): se cotiza contra el dólar, no lo publica el BCV.
+CLP_CODE = "CLP"
+QUOTE_FAILURE_KEY = "rates:clp-failed"
+# Mismos 8 decimales con que se guardan las tasas del BCV.
+RATE_PLACES = Decimal("0.00000001")
+
 
 @dataclass
 class TodayRate:
@@ -48,6 +54,8 @@ class TodayRate:
     date: datetime.date | None
     status: str
     bs_per_unit: dict  # código de moneda -> bolívares por unidad
+    # Monedas cotizadas contra el dólar (spec 013): código -> UsdQuote usada.
+    quotes: dict = field(default_factory=dict)
 
     def to_usd(self, amount, code):
         """Monto en la moneda `code` -> monto en USD, redondeado a céntimos."""
@@ -133,6 +141,65 @@ def update_rates(force=False):
     return True
 
 
+def clp_checked_today():
+    """Hoy ya se leyó el dólar observado (el respaldo no cuenta: se reintenta)."""
+    return UsdQuote.objects.filter(
+        source=UsdQuote.MINDICADOR, fetched_at__date=timezone.localdate()
+    ).exists()
+
+
+def save_quote(currency, date, value, source):
+    """El dólar observado siempre se guarda; el respaldo nunca pisa una tasa que ya exista."""
+    fields = {"units_per_usd": value, "source": source, "fetched_at": timezone.now()}
+    if source == UsdQuote.MINDICADOR:
+        UsdQuote.objects.update_or_create(currency=currency, date=date, defaults=fields)
+    else:
+        UsdQuote.objects.get_or_create(currency=currency, date=date, defaults=fields)
+
+
+def update_quotes(force=False):
+    """Lee el peso chileno si hoy todavía no se ha hecho. Devuelve si lo consiguió.
+
+    Primero mindicador.cl; si falla, open.er-api.com. Si las dos fallan, queda
+    la última tasa guardada (sección 2.0 de la spec 013).
+    """
+    if not force and (clp_checked_today() or cache.get(QUOTE_FAILURE_KEY)):
+        return False
+    currency = Currency.objects.get(code=CLP_CODE)
+    try:
+        for date, value in sources.read_clp().items():
+            save_quote(currency, date, value, UsdQuote.MINDICADOR)
+        return True
+    except sources.SourceError as error:
+        logger.warning("No se pudo leer el dólar observado: %s", error)
+    # Se reintenta mindicador dentro de 15 minutos, haya funcionado o no el respaldo.
+    cache.set(QUOTE_FAILURE_KEY, True, RETRY_AFTER_SECONDS)
+    try:
+        date, value = sources.read_clp_backup()
+    except sources.SourceError as error:
+        logger.warning("Tampoco se pudo leer el respaldo del peso chileno: %s", error)
+        return False
+    save_quote(currency, date, value, UsdQuote.ER_API)
+    return True
+
+
+def add_quotes(bs_per_unit, today):
+    """Pasa a bolívares las monedas cotizadas contra el dólar, con el dólar del BCV.
+
+    Bs. por 1 CLP = (Bs. por 1 USD) / (CLP por 1 USD). Devuelve las cotizaciones usadas.
+    """
+    quote = (
+        UsdQuote.objects.filter(currency__code=CLP_CODE, date__lte=today)
+        .select_related("currency")
+        .first()  # ordenadas de la más reciente a la más antigua
+    )
+    if quote is None:
+        return {}
+    value = bs_per_unit[BASE_CODE] / quote.units_per_usd
+    bs_per_unit[CLP_CODE] = value.quantize(RATE_PLACES, rounding=ROUND_HALF_UP)
+    return {CLP_CODE: quote}
+
+
 def latest_complete_date(today):
     """El día más reciente, hasta hoy, que tiene la tasa de todas las monedas."""
     row = (
@@ -147,8 +214,9 @@ def latest_complete_date(today):
 
 
 def today_rate():
-    """La tasa que rige hoy. Antes, si hace falta, consulta al BCV."""
+    """La tasa que rige hoy. Antes, si hace falta, consulta al BCV y el peso chileno."""
     update_rates()
+    update_quotes()
     today = timezone.localdate()
     date = latest_complete_date(today)
     if date is None:
@@ -159,6 +227,7 @@ def today_rate():
         for rate in ExchangeRate.objects.filter(date=date).select_related("currency")
     }
     bs_per_unit[BOLIVAR_CODE] = Decimal("1")
+    quotes = add_quotes(bs_per_unit, today)
 
     if not bcv_checked_today():
         status = TodayRate.OUTDATED
@@ -166,17 +235,32 @@ def today_rate():
         status = TodayRate.CURRENT
     else:
         status = TodayRate.PREVIOUS_BUSINESS_DAY  # fin de semana o feriado
-    return TodayRate(date=date, status=status, bs_per_unit=bs_per_unit)
+    return TodayRate(date=date, status=status, bs_per_unit=bs_per_unit, quotes=quotes)
 
 
 def rate_data(rate):
-    """La tasa como la devuelve la API."""
+    """La tasa como la devuelve la API.
+
+    Las monedas cotizadas contra el dólar traen además su propia fecha, su
+    fuente y cuántas unidades vale 1 USD.
+    """
+    rates = [
+        {"currency": code, "bs_per_unit": str(rate.bs_per_unit[code])}
+        for code in sources.BCV_BLOCKS
+        if code in rate.bs_per_unit
+    ]
+    for code, quote in rate.quotes.items():
+        rates.append(
+            {
+                "currency": code,
+                "bs_per_unit": str(rate.bs_per_unit[code]),
+                "units_per_usd": str(quote.units_per_usd),
+                "date": quote.date.isoformat(),
+                "source": quote.source,
+            }
+        )
     return {
         "date": rate.date.isoformat() if rate.date else None,
         "status": rate.status,
-        "rates": [
-            {"currency": code, "bs_per_unit": str(rate.bs_per_unit[code])}
-            for code in sources.BCV_BLOCKS
-            if code in rate.bs_per_unit
-        ],
+        "rates": rates,
     }

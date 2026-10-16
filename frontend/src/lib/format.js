@@ -1,10 +1,26 @@
 // Formato de montos y fechas en español. Las fechas viajan como texto
 // "2026-10-12" y los meses como "2026-10".
 
-const numberFormat = new Intl.NumberFormat("es-VE", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+// Decimales de cada moneda según su símbolo ({ "CLP$": 0 }), copiados del
+// catálogo con rememberDecimals. Así formatMoney sabe que el peso chileno no
+// lleva céntimos sin que cada pantalla tenga que pasárselo.
+const decimalsBySymbol = {};
+const numberFormats = {};
+
+export function rememberDecimals(currencies) {
+  for (const currency of currencies) {
+    decimalsBySymbol[currency.symbol] = currency.decimals;
+  }
+}
+
+function numberFormat(decimals) {
+  numberFormats[decimals] ??= new Intl.NumberFormat("es-VE", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return numberFormats[decimals];
+}
+
 const dayFormat = new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long" });
 const monthFormat = new Intl.DateTimeFormat("es", { month: "long", year: "numeric" });
 const weekdayFormat = new Intl.DateTimeFormat("es", { weekday: "long" });
@@ -13,11 +29,12 @@ const weekdayFormat = new Intl.DateTimeFormat("es", { weekday: "long" });
 // Los símbolos que terminan en letra o punto llevan espacio: "Bs. 1.234,50". Es un
 // espacio irrompible, para que símbolo y cifra no se separen al saltar de línea.
 // Number() se usa solo para mostrar; las cuentas las hace siempre el backend.
-export function formatMoney(amount, symbol, sign = "") {
+// `decimals` solo hace falta para forzar otros que los de la moneda (en una tasa).
+export function formatMoney(amount, symbol, sign = "", decimals = decimalsBySymbol[symbol] ?? 2) {
   const value = Number(amount);
   const prefix = value < 0 ? "−" : sign;
   const space = /[\p{L}.]$/u.test(symbol) ? " " : "";
-  return `${prefix}${symbol}${space}${numberFormat.format(Math.abs(value))}`;
+  return `${prefix}${symbol}${space}${numberFormat(decimals).format(Math.abs(value))}`;
 }
 
 const percentFormat = new Intl.NumberFormat("es-VE", {

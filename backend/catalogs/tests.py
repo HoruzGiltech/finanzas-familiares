@@ -54,7 +54,7 @@ class InitialDataTests(BaseTestCase):
         self.assertCountEqual(types, [("income", 1), ("expense", -1)])
 
         self.assertCountEqual(
-            Currency.objects.values_list("code", flat=True), ["USD", "VES", "EUR"]
+            Currency.objects.values_list("code", flat=True), ["USD", "VES", "EUR", "CLP"]
         )
         self.assertEqual(
             list(Currency.objects.filter(is_base=True).values_list("code", flat=True)), ["USD"]
@@ -87,7 +87,7 @@ class ReadTests(BaseTestCase):
             self.assertEqual(response.status_code, 200)
             data = response.json()
             self.assertEqual(len(data["movement_types"]), 2)
-            self.assertEqual(len(data["currencies"]), 3)
+            self.assertEqual(len(data["currencies"]), 4)
             self.assertEqual(len(data["categories"]), 13)
             self.assertEqual(len(data["payment_methods"]), 6)
 

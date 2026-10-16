@@ -15,7 +15,7 @@ from accounts.models import Family, User
 from catalogs.defaults import create_default_catalogs
 from catalogs.models import Category, Currency, PaymentMethod
 
-from rates.models import ExchangeRate
+from rates.models import ExchangeRate, UsdQuote
 from rates.sources import SourceError
 
 from . import export
@@ -515,6 +515,64 @@ class CurrencyTests(BaseTestCase):
         data = self.client.get("/api/movements/?currency=VES").json()
 
         self.assertEqual(data["rate"]["status"], "outdated")
+
+
+class ChileanPesoTests(BaseTestCase):
+    """Anotar y ver en pesos chilenos (spec 013). 1 $ = 400 Bs. = 984,09 CLP$."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_rate("400", "440")
+        UsdQuote.objects.create(
+            currency=Currency.objects.get(code="CLP"),
+            date=self.today,
+            units_per_usd=Decimal("984.09"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=timezone.now(),
+        )
+
+    def create(self, **changes):
+        return self.client.post("/api/movements/", self.payload(**changes))
+
+    def test_pesos_are_saved_in_dollars(self):
+        response = self.create(amount="50000", currency="CLP")
+
+        self.assertEqual(response.status_code, 201)
+        movement = Movement.objects.get()
+        # 50.000 / 984,09 = 50,808 $
+        self.assertEqual(movement.amount, Decimal("50.81"))
+        self.assertEqual(movement.original_amount, Decimal("50000"))
+        self.assertEqual(movement.original_currency.code, "CLP")
+        # Bs. por peso: 400 / 984,09
+        self.assertEqual(movement.exchange_rate, Decimal("0.40646689"))
+
+    def test_pesos_do_not_take_decimals(self):
+        response = self.create(amount="1500.50", currency="CLP")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["amount"], ["Los montos en peso chileno no llevan decimales."]
+        )
+
+    def test_list_in_pesos(self):
+        self.make_movement(amount="10.00")
+
+        data = self.client.get("/api/movements/?currency=CLP").json()
+
+        self.assertEqual(data["currency"], "CLP")
+        self.assertEqual(data["movements"][0]["amount"], "9840.90")
+        clp = data["rate"]["rates"][-1]
+        self.assertEqual(clp["currency"], "CLP")
+        self.assertEqual(clp["units_per_usd"], "984.09000000")
+        self.assertEqual(clp["date"], self.today.isoformat())
+
+    def test_without_any_peso_rate_pesos_cannot_be_used(self):
+        UsdQuote.objects.all().delete()
+
+        response = self.create(amount="50000", currency="CLP")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("currency", response.json())
 
 
 class SummaryTests(BaseTestCase):

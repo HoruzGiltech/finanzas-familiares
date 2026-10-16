@@ -1,12 +1,13 @@
 import { useState } from "react";
 
+import { useAuth } from "../auth/AuthContext.jsx";
 import { apiPatch, apiPost, readErrors } from "../lib/api.js";
+import { currencyDecimals, entryCurrency } from "../lib/currency.js";
 import { toTypedDate, today } from "../lib/format.js";
 import { toOptions } from "../lib/options.js";
-import { canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
 import Alert from "./Alert.jsx";
-import AmountField, { amountForApi } from "./AmountField.jsx";
+import AmountField, { amountForApi, amountForInput } from "./AmountField.jsx";
 import Button from "./Button.jsx";
 import DateField, { checkTypedDate } from "./DateField.jsx";
 import Field from "./Field.jsx";
@@ -14,22 +15,24 @@ import SegmentedControl from "./SegmentedControl.jsx";
 
 // Formulario para registrar un movimiento o corregir uno (`movement`).
 // Al guardar llama a onSaved con el movimiento que devuelve la API.
-// `rate` es la tasa de hoy; `defaultCurrency`, la moneda que se está viendo.
-export default function MovementForm({
-  movement,
-  catalogs,
-  rate,
-  defaultCurrency,
-  onSaved,
-  onCancel,
-}) {
+// `rate` es la tasa de hoy. Uno nuevo empieza en la moneda para anotar de la
+// familia (spec 013).
+export default function MovementForm({ movement, catalogs, rate, onSaved, onCancel }) {
+  const { user } = useAuth();
   // Por defecto "gasto", que es lo que más se anota.
   const [type, setType] = useState(movement?.movement_type ?? "expense");
   // Al corregir se muestra lo que se escribió, en su moneda.
   // El monto llega como "45.30" y se muestra con coma, como se escribe aquí.
-  const [amount, setAmount] = useState(movement?.original_amount.replace(".", ",") ?? "");
+  const [amount, setAmount] = useState(
+    movement
+      ? amountForInput(
+          movement.original_amount,
+          currencyDecimals(catalogs.currencies, movement.original_currency),
+        )
+      : "",
+  );
   const [currency, setCurrency] = useState(
-    movement?.original_currency ?? (canUse(defaultCurrency, rate) ? defaultCurrency : "USD"),
+    movement?.original_currency ?? entryCurrency(user, rate),
   );
   const [category, setCategory] = useState(movement?.category.id ?? "");
   const [paymentMethod, setPaymentMethod] = useState(movement?.payment_method.id ?? "");
@@ -80,7 +83,7 @@ export default function MovementForm({
     const body = {
       category: Number(category),
       payment_method: Number(paymentMethod),
-      amount: amountForApi(amount),
+      amount: amountForApi(amount, currencyDecimals(catalogs.currencies, currency)),
       currency,
       date: checked.date, // la API espera "2026-10-15"
       description: description.trim(),

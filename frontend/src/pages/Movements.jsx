@@ -350,7 +350,6 @@ export default function Movements() {
               movement={editing}
               catalogs={catalogs}
               rate={data?.rate}
-              defaultCurrency={currency}
               onSaved={handleSaved}
               onCancel={() => setFormOpen(false)}
             />

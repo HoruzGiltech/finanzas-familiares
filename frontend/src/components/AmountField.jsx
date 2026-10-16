@@ -1,3 +1,4 @@
+import { currencyDecimals } from "../lib/currency.js";
 import { formatMoney } from "../lib/format.js";
 import { approxUsd, canUse } from "../lib/rates.js";
 import Field from "./Field.jsx";
@@ -5,17 +6,25 @@ import { RateNotice } from "./RateInfo.jsx";
 import SegmentedControl from "./SegmentedControl.jsx";
 
 // "1500,5" -> 1500.5, o null si no es un número. Solo para el equivalente aproximado.
-function parseAmount(text) {
-  const value = Number(text.trim().replace(",", "."));
+function parseAmount(text, decimals) {
+  const value = Number(amountForApi(text, decimals));
   return text.trim() && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 // En Venezuela los decimales se escriben con coma; la API los espera con punto.
-export function amountForApi(text) {
-  return text.trim().replace(",", ".");
+// En una moneda sin decimales (pesos chilenos) el punto separa los miles:
+// "50.000" son cincuenta mil. Una coma se deja, y la API avisa de que sobra.
+export function amountForApi(text, decimals = 2) {
+  const clean = text.trim();
+  return decimals === 0 ? clean.replace(/[.\s]/g, "") : clean.replace(",", ".");
 }
 
-// Monto con su moneda ($ · € · Bs.). En otra moneda enseña cuánto será en
+// "45.30" de la API -> "45,30" para el campo; en pesos, "9840.90" -> "9841".
+export function amountForInput(apiText, decimals = 2) {
+  return Number(apiText).toFixed(decimals).replace(".", ",");
+}
+
+// Monto con su moneda ($ · € · Bs. · CLP$). En otra moneda enseña cuánto será en
 // dólares con la tasa de hoy; el número que vale lo calcula el backend.
 // `extraCurrency`: una moneda ya desactivada que se puede conservar al corregir.
 export default function AmountField({
@@ -39,7 +48,8 @@ export default function AmountField({
   if (extraCurrency && !(extraCurrency in symbols)) {
     options.push({ value: extraCurrency, label: extraCurrency });
   }
-  const typed = parseAmount(amount);
+  const decimals = currencyDecimals(currencies, currency);
+  const typed = parseAmount(amount, decimals);
   const equivalent =
     currency === "USD"
       ? null
@@ -54,7 +64,7 @@ export default function AmountField({
           <Field
             label={label}
             inputMode="decimal" // teclado numérico en el móvil
-            placeholder="0,00"
+            placeholder={decimals === 0 ? "0" : "0,00"}
             autoComplete="off"
             value={amount}
             error={errors.amount}

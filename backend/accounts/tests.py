@@ -2,6 +2,8 @@ from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from catalogs.models import Currency
+
 from .models import Family, User
 
 PASSWORD = "clave-Segura-2026"
@@ -117,6 +119,49 @@ class LoginTests(BaseTestCase):
 
         self.assertEqual(self.client.post("/api/auth/logout/").status_code, 204)
         self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
+
+
+class EntryCurrencyTests(BaseTestCase):
+    """La moneda para anotar de la familia (spec 013)."""
+
+    def change(self, user, code):
+        self.client.force_login(user)
+        return self.client.patch("/api/family/", {"entry_currency": code})
+
+    def test_a_new_family_writes_in_dollars(self):
+        self.client.force_login(self.viewer)
+
+        response = self.client.get("/api/auth/me/")
+
+        self.assertEqual(response.json()["family"]["entry_currency"], "USD")
+
+    def test_the_admin_changes_it(self):
+        response = self.change(self.admin, "CLP")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["entry_currency"], "CLP")
+        self.family.refresh_from_db()
+        self.assertEqual(self.family.entry_currency.code, "CLP")
+
+    def test_editors_and_viewers_cannot_change_it(self):
+        for user in (self.editor, self.viewer):
+            with self.subTest(user=user.email):
+                self.assertEqual(self.change(user, "CLP").status_code, 403)
+        self.family.refresh_from_db()
+        self.assertEqual(self.family.entry_currency.code, "USD")
+
+    def test_only_active_currencies(self):
+        Currency.objects.filter(code="EUR").update(is_active=False)
+
+        for code in ("EUR", "XXX", ""):
+            with self.subTest(code=code):
+                response = self.change(self.admin, code)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("entry_currency", response.json())
+
+    def test_needs_a_session(self):
+        response = self.client.patch("/api/family/", {"entry_currency": "CLP"})
+        self.assertEqual(response.status_code, 401)
 
 
 class MemberTests(BaseTestCase):

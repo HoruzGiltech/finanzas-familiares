@@ -2,10 +2,22 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 
 
+def base_currency_id():
+    """La moneda base (USD). Se importa aquí dentro porque catalogs ya importa este módulo."""
+    from catalogs.models import Currency
+
+    return Currency.objects.get(is_base=True).pk
+
+
 class Family(models.Model):
     """El grupo que comparte las finanzas. Todos los datos pertenecen a una familia."""
 
     name = models.CharField(max_length=100)
+    # La moneda con la que empiezan los formularios de montos. La elige el
+    # administrador (spec 013); los montos se siguen guardando en USD.
+    entry_currency = models.ForeignKey(
+        "catalogs.Currency", on_delete=models.PROTECT, default=base_currency_id, related_name="+"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

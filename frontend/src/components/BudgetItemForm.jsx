@@ -1,12 +1,14 @@
 import { useState } from "react";
 
+import { useAuth } from "../auth/AuthContext.jsx";
 import { apiPatch, apiPost, readErrors } from "../lib/api.js";
+import { currencyDecimals, entryCurrency } from "../lib/currency.js";
 import { formatMoney } from "../lib/format.js";
 import { toOptions } from "../lib/options.js";
 import { canUse } from "../lib/rates.js";
 import { useFocusFirstError } from "../lib/useFocusFirstError.js";
 import Alert from "./Alert.jsx";
-import AmountField, { amountForApi } from "./AmountField.jsx";
+import AmountField, { amountForApi, amountForInput } from "./AmountField.jsx";
 import Button from "./Button.jsx";
 import Field from "./Field.jsx";
 
@@ -30,8 +32,12 @@ export default function BudgetItemForm({
   onSaved,
   onCancel,
 }) {
-  const startAmount = item ? item.amount.replace(".", ",") : "";
-  const startCurrency = item && canUse(viewCurrency, rate) ? viewCurrency : "USD";
+  const { user } = useAuth();
+  const decimalsOf = (code) => currencyDecimals(catalogs.currencies, code);
+  const startAmount = item ? amountForInput(item.amount, decimalsOf(viewCurrency)) : "";
+  // Una nueva empieza en la moneda para anotar de la familia (spec 013).
+  const viewOk = canUse(viewCurrency, rate) ? viewCurrency : "USD";
+  const startCurrency = item ? viewOk : entryCurrency(user, rate);
   const fromList = item?.shopping_list.length > 0;
   const [description, setDescription] = useState(item?.description ?? "");
   const [category, setCategory] = useState(item?.category.id ?? "");
@@ -61,7 +67,7 @@ export default function BudgetItemForm({
 
     const body = { description: description.trim(), category: Number(category) };
     if (!item || amount !== startAmount || currency !== startCurrency) {
-      body.amount = amountForApi(amount);
+      body.amount = amountForApi(amount, decimalsOf(currency));
       body.currency = currency;
     }
 

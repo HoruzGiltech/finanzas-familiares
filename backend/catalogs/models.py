@@ -29,6 +29,8 @@ class Currency(models.Model):
     symbol = models.CharField(max_length=5)
     # Solo una moneda es la base (USD): en ella se guardan todos los montos.
     is_base = models.BooleanField(default=False)
+    # Cuántos decimales se escriben y se muestran: el peso chileno no usa céntimos.
+    decimals = models.PositiveSmallIntegerField(default=2)
     is_active = models.BooleanField(default=True)
 
     class Meta:

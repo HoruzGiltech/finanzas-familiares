@@ -3,9 +3,11 @@ import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
+import { useAuth } from "../auth/AuthContext.jsx";
 import Alert from "../components/Alert.jsx";
 import Card from "../components/Card.jsx";
 import EditableList from "../components/EditableList.jsx";
+import SegmentedControl from "../components/SegmentedControl.jsx";
 import Skeleton from "../components/Skeleton.jsx";
 import { apiDelete, apiGet, apiPatch, apiPost, readErrors } from "../lib/api.js";
 import { slideUp, staggerList } from "../lib/motion.js";
@@ -34,8 +36,10 @@ function replaceById(list, updated) {
 }
 
 export default function Settings() {
+  const { user, setUser } = useAuth();
   const [catalogs, setCatalogs] = useState(null); // null = cargando
   const [loadError, setLoadError] = useState("");
+  const [entryError, setEntryError] = useState("");
 
   useEffect(() => {
     apiGet("/catalogs/?include_inactive=1")
@@ -48,6 +52,19 @@ export default function Settings() {
       })
       .catch((err) => setLoadError(err.message));
   }, []);
+
+  // --- Moneda para anotar (spec 013) ---
+
+  async function changeEntryCurrency(code) {
+    setEntryError("");
+    const { data, error } = await save(() => apiPatch("/family/", { entry_currency: code }));
+    if (data) {
+      // La familia viaja con el usuario: así los formularios ven la nueva moneda.
+      setUser((current) => ({ ...current, family: data }));
+    } else {
+      setEntryError(error);
+    }
+  }
 
   // --- Categorías ---
 
@@ -209,7 +226,7 @@ export default function Settings() {
               <h2 className="text-lg font-semibold">Monedas</h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 Todo se guarda en la moneda base. Los montos en las demás se ven con la tasa oficial
-                del BCV de hoy.
+                del BCV de hoy; el peso chileno, con el dólar observado del Banco Central de Chile.
               </p>
               <ul className="mt-3 divide-y divide-border">
                 {catalogs.currencies.map((currency) => (
@@ -226,6 +243,25 @@ export default function Settings() {
                   </li>
                 ))}
               </ul>
+              <div className="mt-2 border-t border-border pt-4">
+                <h3 className="font-semibold">Moneda para anotar</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Los formularios de movimientos y presupuesto empiezan con esta moneda. En cada
+                  uno se puede cambiar.
+                </p>
+                <SegmentedControl
+                  label="Moneda para anotar"
+                  options={catalogs.currencies.map((currency) => ({
+                    value: currency.code,
+                    label: currency.symbol,
+                    ariaLabel: currency.name,
+                  }))}
+                  value={user.family.entry_currency}
+                  onChange={changeEntryCurrency}
+                  className="mt-3 sm:max-w-sm"
+                />
+                {entryError && <Alert className="mt-3">{entryError}</Alert>}
+              </div>
             </Card>
           </motion.div>
         </motion.div>

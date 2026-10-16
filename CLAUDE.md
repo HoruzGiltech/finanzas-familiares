@@ -139,6 +139,11 @@ solo esas variables, nunca colores sueltos.
 - Tasas en la app `rates`. `rates.services.today_rate()` da la tasa de hoy (y
   consulta al BCV si hace falta); las conversiones usan sus `to_usd` y
   `from_usd`. Las pruebas nunca salen a internet: simulan `rates.sources`.
+- El peso chileno (spec 013) se guarda en `UsdQuote` (pesos por 1 USD, de
+  mindicador.cl y, de respaldo, open.er-api.com) y se pasa a bolívares con el
+  dólar del BCV. `Currency.decimals` dice cuántos decimales lleva cada moneda.
+  `Family.entry_currency` es la moneda con que empiezan los formularios; solo
+  la cambia el administrador (`PATCH /api/family/`).
 - Presupuesto en la app `budget` (spec 010): `BudgetItem` en USD; realizada
   cuando tiene un movimiento enlazado (`SET_NULL`: si se borra, vuelve a
   pendiente). Mismo permiso que movimientos, pero cualquier editor toca
@@ -190,6 +195,7 @@ solo esas variables, nunca colores sueltos.
 | 010 | Presupuesto mensual | Implementada |
 | 011 | Presupuesto compacto y lista del supermercado | Implementada |
 | 012 | Despliegue en Vercel y Railway | Aprobada |
+| 013 | Peso chileno y moneda para anotar | Implementada |
 
 Actualiza la columna "Estado" al escribir, aprobar e implementar cada spec.
 

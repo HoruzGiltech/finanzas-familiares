@@ -149,6 +149,12 @@ class MovementWriteSerializer(serializers.Serializer):
 
 def money_fields(amount, currency):
     """Convierte lo escrito a USD con la tasa de hoy y comprueba los límites."""
+    if amount != round(amount, currency.decimals):
+        raise serializers.ValidationError(
+            {"amount": f"Los montos en {currency.name.lower()} no llevan decimales."}
+            if currency.decimals == 0
+            else {"amount": f"Usa como mucho {currency.decimals} decimales."}
+        )
     if currency.is_base:
         usd, exchange_rate = amount, None
     else:

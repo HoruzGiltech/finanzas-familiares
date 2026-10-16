@@ -18,6 +18,8 @@ from .models import Family, User
 from .permissions import IsFamilyAdmin
 from .serializers import (
     ChangePasswordSerializer,
+    FamilySerializer,
+    FamilyUpdateSerializer,
     LoginSerializer,
     MemberCreateSerializer,
     MemberUpdateSerializer,
@@ -129,6 +131,23 @@ class ChangePasswordView(APIView):
         # Mantiene abierta esta sesión; las demás sesiones del usuario dejan de valer.
         update_session_auth_hash(request, user)
         return Response(UserSerializer(user).data)
+
+
+class FamilyView(APIView):
+    """El administrador cambia la moneda para anotar de su familia (spec 013).
+
+    Para leerla no hace falta esta vista: viene con el usuario en auth/me/.
+    """
+
+    permission_classes = [IsFamilyAdmin]
+
+    def patch(self, request):
+        serializer = FamilyUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        family = request.user.family
+        family.entry_currency = serializer.validated_data["entry_currency"]
+        family.save(update_fields=["entry_currency"])
+        return Response(FamilySerializer(family).data)
 
 
 class MemberListView(APIView):

@@ -12,6 +12,7 @@ from pathlib import Path
 import certifi
 import requests
 from bs4 import BeautifulSoup
+from django.utils import timezone
 from requests.adapters import HTTPAdapter
 
 BCV_URL = "https://www.bcv.org.ve/"
@@ -19,6 +20,10 @@ HISTORY_URLS = {
     "USD": "https://ve.dolarapi.com/v1/historicos/dolares/oficial",
     "EUR": "https://ve.dolarapi.com/v1/historicos/euros/oficial",
 }
+# Peso chileno (spec 013): dólar observado del Banco Central de Chile y, de
+# respaldo, el tipo de cambio de mercado de ExchangeRate-API.
+CLP_URL = "https://mindicador.cl/api/dolar"
+CLP_BACKUP_URL = "https://open.er-api.com/v6/latest/USD"
 # En qué bloque de la página del BCV está cada moneda (<div id="dolar">).
 BCV_BLOCKS = {"USD": "dolar", "EUR": "euro"}
 TIMEOUT_SECONDS = 10
@@ -106,3 +111,38 @@ def read_history():
         except (ValueError, KeyError, TypeError, InvalidOperation) as error:
             raise SourceError("El histórico de DolarAPI tiene un formato inesperado.") from error
     return history
+
+
+def positive(value):
+    """El número de una API JSON como Decimal positivo, o SourceError."""
+    number = Decimal(str(value))
+    if number <= 0:
+        raise SourceError(f"Tasa no válida: {value!r}")
+    return number
+
+
+def read_clp():
+    """Dólar observado de los últimos días: {fecha: pesos por 1 USD}."""
+    try:
+        rows = download(CLP_URL).json()["serie"]
+        # "2026-10-16T03:00:00.000Z" es la medianoche de ese día en Chile.
+        quotes = {
+            datetime.date.fromisoformat(row["fecha"][:10]): positive(row["valor"]) for row in rows
+        }
+    except (ValueError, KeyError, TypeError, InvalidOperation) as error:
+        raise SourceError("mindicador.cl tiene un formato inesperado.") from error
+    if not quotes:
+        raise SourceError("mindicador.cl no trajo ninguna tasa.")
+    return quotes
+
+
+def read_clp_backup():
+    """Respaldo: el tipo de cambio de hoy de ExchangeRate-API, (fecha, pesos por 1 USD)."""
+    try:
+        data = download(CLP_BACKUP_URL).json()
+        # La hora viene en UTC; la fecha se toma en la hora de Caracas, como todo.
+        moment = datetime.datetime.fromtimestamp(data["time_last_update_unix"], datetime.UTC)
+        date = timezone.localdate(moment)
+        return date, positive(data["rates"]["CLP"])
+    except (ValueError, KeyError, TypeError, InvalidOperation, OverflowError) as error:
+        raise SourceError("open.er-api.com tiene un formato inesperado.") from error
