@@ -37,13 +37,14 @@ export default function AmountField({
   rate,
   errors = {},
   extraCurrency,
+  disabled = false,
 }) {
   const symbols = Object.fromEntries(currencies.map((item) => [item.code, item.symbol]));
   const options = currencies.map((item) => ({
     value: item.code,
     label: item.symbol,
     ariaLabel: item.name,
-    disabled: !canUse(item.code, rate),
+    disabled: disabled || !canUse(item.code, rate),
   }));
   if (extraCurrency && !(extraCurrency in symbols)) {
     options.push({ value: extraCurrency, label: extraCurrency });
@@ -69,6 +70,7 @@ export default function AmountField({
             value={amount}
             error={errors.amount}
             onChange={(event) => onAmountChange(event.target.value)}
+            disabled={disabled}
             className="min-w-0 flex-1"
           />
           {/* mt-6: a la altura del campo, bajo su etiqueta. */}

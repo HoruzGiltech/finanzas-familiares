@@ -1,8 +1,8 @@
 """
 Comparación de un mes con los anteriores (spec 007).
 
-Todo se suma en USD y cada monto se convierte al final con `convert`. Los
-porcentajes se calculan en USD, así no cambian con la moneda.
+Las monedas actuales se agregan en USD y se convierten al final. En CLP se
+agregan los importes mostrados por movimiento, incluidos los porcentajes.
 
 El mes en curso se compara "hasta el mismo día": el 15 de octubre, con lo del
 1 al 15 de septiembre. Comparar medio mes con un mes entero engañaría.
@@ -61,46 +61,83 @@ def percent_change(now, before):
     return str(change.quantize(ONE_DECIMAL, rounding=ROUND_HALF_UP))
 
 
-def money(convert, amount):
-    """De USD a la moneda que se ve, como texto con dos decimales."""
+def money(convert, amount, already_displayed=False):
+    """Formatea un total ya convertido o lo pasa desde USD a la moneda elegida."""
+    if already_displayed:
+        return str(amount)
     return str(convert(amount.quantize(CENT, rounding=ROUND_HALF_UP)))
 
 
-def previous_month(movements, month, until_day, convert):
+def totals(movements, display_amount=None):
+    if not display_amount:
+        return totals_usd(movements)
+    result = {MovementType.INCOME: ZERO, MovementType.EXPENSE: ZERO}
+    for movement in movements.select_related("category__movement_type", "original_currency"):
+        code = movement.category.movement_type.code
+        result[code] += display_amount(movement)
+    return {
+        key: value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        for key, value in result.items()
+    }
+
+
+def previous_month(movements, month, until_day, convert, display_amount=None):
     """Totales del mes anterior (en su periodo comparable) y cuánto cambió este mes."""
     before_month = shift_month(month, -1)
     if not in_period(movements, before_month, None).exists():
         return None
-    now = totals_usd(in_period(movements, month, until_day))
-    before = totals_usd(in_period(movements, before_month, until_day))
+    now = totals(in_period(movements, month, until_day), display_amount)
+    before = totals(in_period(movements, before_month, until_day), display_amount)
     now["balance"] = now["income"] - now["expense"]
     before["balance"] = before["income"] - before["expense"]
     return {
         "month": before_month.strftime("%Y-%m"),
-        "totals": {key: money(convert, value) for key, value in before.items()},
+        "totals": {
+            key: money(convert, value, already_displayed=display_amount is not None)
+            for key, value in before.items()
+        },
         "change": {key: percent_change(now[key], before[key]) for key in now},
     }
 
 
-def history(movements, month, today, convert):
+def history(movements, month, today, convert, display_amount=None):
     """Los 6 meses que terminan en `month`, con sus totales completos."""
     first = shift_month(month, -(HISTORY_MONTHS - 1))
     end = shift_month(month, 1)
-    rows = (
-        movements.filter(date__gte=first, date__lt=end)
-        .annotate(month=TruncMonth("date"))
-        .values("month", "category__movement_type__code")
-        .annotate(total=Sum("amount"))
-    )
-    by_month = {}
-    for row in rows:
-        by_month.setdefault(row["month"], {})[row["category__movement_type__code"]] = row["total"]
+    if display_amount:
+        by_month = {}
+        rows = movements.filter(date__gte=first, date__lt=end).select_related(
+            "category__movement_type", "original_currency"
+        )
+        for movement in rows:
+            current = movement.date.replace(day=1)
+            code = movement.category.movement_type.code
+            totals = by_month.setdefault(current, {})
+            totals[code] = totals.get(code, ZERO) + display_amount(movement)
+    else:
+        rows = (
+            movements.filter(date__gte=first, date__lt=end)
+            .annotate(month=TruncMonth("date"))
+            .values("month", "category__movement_type__code")
+            .annotate(total=Sum("amount"))
+        )
+        by_month = {}
+        for row in rows:
+            by_month.setdefault(row["month"], {})[
+                row["category__movement_type__code"]
+            ] = row["total"]
 
     result = []
     for delta in range(HISTORY_MONTHS):
         current = shift_month(first, delta)
-        income = convert(by_month.get(current, {}).get(MovementType.INCOME, ZERO))
-        expense = convert(by_month.get(current, {}).get(MovementType.EXPENSE, ZERO))
+        income = by_month.get(current, {}).get(MovementType.INCOME, ZERO)
+        expense = by_month.get(current, {}).get(MovementType.EXPENSE, ZERO)
+        if display_amount:
+            income = income.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            expense = expense.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        else:
+            income = convert(income)
+            expense = convert(expense)
         result.append(
             {
                 "month": current.strftime("%Y-%m"),
@@ -114,8 +151,23 @@ def history(movements, month, today, convert):
     return result
 
 
-def expenses_by_category(movements, names):
+def expenses_by_category(movements, names, display_amount=None):
     """{id de categoría: total en USD} de los gastos. Apunta cada nombre en `names`."""
+    if display_amount:
+        totals = {}
+        expenses = movements.filter(
+            category__movement_type__code=MovementType.EXPENSE
+        ).select_related("category", "original_currency")
+        for movement in expenses:
+            names[movement.category_id] = movement.category.name
+            totals[movement.category_id] = (
+                totals.get(movement.category_id, ZERO) + display_amount(movement)
+            )
+        return {
+            category_id: total.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            for category_id, total in totals.items()
+        }
+
     rows = (
         movements.filter(category__movement_type__code=MovementType.EXPENSE)
         .values("category_id", "category__name")
@@ -128,7 +180,7 @@ def expenses_by_category(movements, names):
     return totals
 
 
-def categories(movements, month, until_day, convert):
+def categories(movements, month, until_day, convert, display_amount=None):
     """Cada categoría de gasto frente al promedio de los meses anteriores,
     de la que más subió a la que más bajó.
 
@@ -141,42 +193,51 @@ def categories(movements, month, until_day, convert):
         return []
 
     names = {}
-    now = expenses_by_category(in_period(movements, month, until_day), names)
+    now = expenses_by_category(
+        in_period(movements, month, until_day), names, display_amount
+    )
     before = {}  # suma de los meses anteriores, por categoría
     for previous in months:
-        totals = expenses_by_category(in_period(movements, previous, until_day), names)
-        for category_id, total in totals.items():
+        previous_totals = expenses_by_category(
+            in_period(movements, previous, until_day), names, display_amount
+        )
+        for category_id, total in previous_totals.items():
             before[category_id] = before.get(category_id, ZERO) + total
 
     rows = []
+    unit = Decimal("1") if display_amount else CENT
     for category_id in names:
         amount = now.get(category_id, ZERO)
         average = (before.get(category_id, ZERO) / len(months)).quantize(
-            CENT, rounding=ROUND_HALF_UP
+            unit, rounding=ROUND_HALF_UP
         )
         rows.append((amount - average, names[category_id], category_id, amount, average))
-    rows.sort(key=lambda row: (-row[0], row[1]))  # el cambio se ordena en USD
+    rows.sort(key=lambda row: (-row[0], row[1]))
 
     return [
         {
             "id": category_id,
             "name": name,
-            "amount": money(convert, amount),
-            "average": money(convert, average),
-            "change": money(convert, change),
+            "amount": money(convert, amount, display_amount is not None),
+            "average": money(convert, average, display_amount is not None),
+            "change": money(convert, change, display_amount is not None),
             "change_percent": percent_change(amount, average),
         }
         for change, name, category_id, amount, average in rows
     ]
 
 
-def comparison(movements, month, today, convert):
+def comparison(movements, month, today, convert, display_amount=None):
     """La respuesta de GET movements/comparison/. `movements`: todos los de la familia."""
     in_progress = (month.year, month.month) == (today.year, today.month)
     until_day = today.day if in_progress else None
     return {
         "partial_until": until_day,
-        "previous": previous_month(movements, month, until_day, convert),
-        "history": history(movements, month, today, convert),
-        "categories": categories(movements, month, until_day, convert),
+        "previous": previous_month(
+            movements, month, until_day, convert, display_amount
+        ),
+        "history": history(movements, month, today, convert, display_amount),
+        "categories": categories(
+            movements, month, until_day, convert, display_amount
+        ),
     }

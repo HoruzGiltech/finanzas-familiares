@@ -16,8 +16,8 @@ MIN_DATE = datetime.date(2000, 1, 1)
 class MovementSerializer(serializers.ModelSerializer):
     """Lo que la API devuelve de un movimiento.
 
-    `amount` sale en USD, salvo que el contexto traiga `convert`: una función
-    que pasa de USD a la moneda que se está viendo.
+    `amount` sale en USD, salvo que el contexto traiga una función para mostrarlo
+    en la moneda elegida.
     """
 
     amount = serializers.SerializerMethodField()
@@ -45,6 +45,9 @@ class MovementSerializer(serializers.ModelSerializer):
         ]
 
     def get_amount(self, movement):
+        display_amount = self.context.get("display_amount")
+        if display_amount:
+            return str(display_amount(movement))
         convert = self.context.get("convert")
         # Como texto, para no perder decimales.
         return str(convert(movement.amount) if convert else movement.amount)

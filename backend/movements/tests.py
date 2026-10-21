@@ -97,6 +97,23 @@ class BaseTestCase(TestCase):
             created_by=user,
         )
 
+    def make_clp_movement(
+        self, original_amount, category="Alimentación", user=None, date=None, method="Efectivo"
+    ):
+        user = user or self.admin
+        quote = UsdQuote.objects.get(currency__code="CLP")
+        amount_usd = (Decimal(original_amount) / quote.units_per_usd).quantize(Decimal("0.01"))
+        return Movement.objects.create(
+            family=user.family,
+            category=self.category(category, user.family),
+            payment_method=self.payment_method(method, user.family),
+            amount=amount_usd,
+            original_amount=Decimal(original_amount),
+            original_currency=Currency.objects.get(code="CLP"),
+            date=date or self.today,
+            created_by=user,
+        )
+
     def set_rate(self, usd, eur):
         """Guarda la tasa de hoy como leída del BCV: así no hace falta consultarlo."""
         for code, value in {"USD": usd, "EUR": eur}.items():
@@ -560,11 +577,42 @@ class ChileanPesoTests(BaseTestCase):
         data = self.client.get("/api/movements/?currency=CLP").json()
 
         self.assertEqual(data["currency"], "CLP")
-        self.assertEqual(data["movements"][0]["amount"], "9840.90")
+        self.assertEqual(data["movements"][0]["amount"], "9841")
         clp = data["rate"]["rates"][-1]
         self.assertEqual(clp["currency"], "CLP")
         self.assertEqual(clp["units_per_usd"], "984.09000000")
         self.assertEqual(clp["date"], self.today.isoformat())
+
+    def test_original_pesos_and_totals_do_not_change_with_later_rates(self):
+        peso = self.create(amount="50000", currency="CLP").json()
+        self.make_movement(amount="20.00")
+        UsdQuote.objects.filter(currency__code="CLP").update(
+            units_per_usd=Decimal("1200.00")
+        )
+
+        data = self.client.get("/api/movements/?currency=CLP").json()
+        rows = {movement["id"]: movement for movement in data["movements"]}
+
+        self.assertEqual(rows[peso["id"]]["amount"], "50000")
+        self.assertEqual(data["totals"]["expense"], "74000")
+
+    def test_summary_aggregates_displayed_pesos_and_calculates_percentages_in_clp(self):
+        self.create(amount="50000", currency="CLP")
+        self.make_movement(amount="20.00")
+        self.make_movement(category="Vivienda", amount="10.00")
+        UsdQuote.objects.filter(currency__code="CLP").update(
+            units_per_usd=Decimal("1200.00")
+        )
+
+        data = self.client.get("/api/movements/summary/?currency=CLP").json()
+
+        self.assertEqual(data["totals"]["expense"], "86000")
+        self.assertEqual(
+            [(row["name"], row["amount"], row["percent"]) for row in data["by_category"]],
+            [("Alimentación", "74000", "86.0"), ("Vivienda", "12000", "14.0")],
+        )
+        self.assertEqual(sum(Decimal(row["amount"]) for row in data["by_day"]), Decimal("86000"))
+        self.assertEqual(data["top_expenses"][0]["amount"], "50000")
 
     def test_without_any_peso_rate_pesos_cannot_be_used(self):
         UsdQuote.objects.all().delete()
@@ -833,6 +881,23 @@ class ComparisonTests(BaseTestCase):
             [r["change_percent"] for r in dollars["categories"]],
         )
 
+    def test_clp_comparison_amounts_and_percentages_use_displayed_pesos(self):
+        UsdQuote.objects.create(
+            currency=Currency.objects.get(code="CLP"),
+            date=self.today,
+            units_per_usd=Decimal("1000.00"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=timezone.now(),
+        )
+        self.make_clp_movement("50000", date=datetime.date(2025, 2, 6))
+        self.make_clp_movement("50000", date=datetime.date(2025, 3, 11))
+
+        data = self.compare(f"{self.URL}&currency=CLP")
+
+        self.assertEqual(data["previous"]["totals"]["expense"], "140000")
+        self.assertEqual(data["previous"]["change"]["expense"], "57.1")
+        self.assertEqual(data["history"][-1]["expense"], "220000")
+
     def test_without_previous_months_there_is_nothing_to_compare(self):
         data = self.compare("/api/movements/comparison/?month=2024-12")
 
@@ -854,6 +919,17 @@ class ComparisonTests(BaseTestCase):
 
 class ExportTests(BaseTestCase):
     """Spec 008: los movimientos de un rango en CSV."""
+
+    def setUp(self):
+        super().setUp()
+        self.set_rate("400", "440")
+        UsdQuote.objects.create(
+            currency=Currency.objects.get(code="CLP"),
+            date=self.today,
+            units_per_usd=Decimal("984.09"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=timezone.now(),
+        )
 
     def export(self, client=None, start=None, end=None):
         start = start or self.today.replace(day=1)
@@ -889,6 +965,7 @@ class ExportTests(BaseTestCase):
                     "Descripción",
                     "Método de pago",
                     "Monto USD",
+                    "Monto CLP",
                     "Monto anotado",
                     "Moneda anotada",
                     "Tasa usada",
@@ -898,7 +975,7 @@ class ExportTests(BaseTestCase):
             dates = [row[0] for row in rows[1:]]
             expected = [older.date.strftime("%d/%m/%Y"), newer.date.strftime("%d/%m/%Y")]
             self.assertEqual(dates, expected)
-            self.assertEqual(rows[2][9], self.editor.full_name)
+            self.assertEqual(rows[2][10], self.editor.full_name)
 
     def test_expenses_are_negative_and_the_rate_is_empty_in_dollars(self):
         self.make_movement(amount="45.30")
@@ -918,9 +995,12 @@ class ExportTests(BaseTestCase):
         expense, income = self.rows(self.export())[1:]
 
         self.assertEqual(expense[1:3], ["Gasto", "Alimentación"])
-        self.assertEqual(expense[5:9], ["-45,30", "45,30", "USD", ""])
-        self.assertEqual(income[1:6], ["Ingreso", "Salario", "Quincena", "Efectivo", "1234,50"])
-        self.assertEqual(income[6:9], ["493800,00", "VES", "400,00000000"])
+        self.assertEqual(expense[5:10], ["-45,30", "-44579", "45,30", "USD", ""])
+        self.assertEqual(
+            income[1:7],
+            ["Ingreso", "Salario", "Quincena", "Efectivo", "1234,50", "1214859"],
+        )
+        self.assertEqual(income[7:10], ["493800,00", "VES", "400,00000000"])
 
     def test_only_the_family_movements_and_a_session_is_needed(self):
         self.make_movement(user=self.outsider)
@@ -960,6 +1040,25 @@ class ExportTests(BaseTestCase):
         self.assertEqual(row[2], "'@Comida")
         self.assertEqual(row[5], "-10,00")  # el signo de un monto no lleva apóstrofo
         self.assertEqual(export.text("\t=1+1"), "'\t=1+1")
+
+    def test_clp_column_preserves_original_amount_and_converts_other_currencies(self):
+        self.make_clp_movement("50000")
+        self.make_movement(amount="20.00")
+
+        rows = self.rows(self.export())[1:]
+
+        clp_row = next(row for row in rows if row[8] == "CLP")
+        usd_row = next(row for row in rows if row[8] == "USD")
+        self.assertEqual(clp_row[6], "-50000")
+        self.assertEqual(usd_row[6], "-19682")
+
+    def test_export_requires_a_clp_rate_for_the_new_column(self):
+        UsdQuote.objects.all().delete()
+
+        response = self.export()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("currency", response.json())
 
 
 @override_settings(DEBUG=True)  # seed_demo se niega a funcionar sin DEBUG

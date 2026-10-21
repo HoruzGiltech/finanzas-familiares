@@ -4,6 +4,9 @@ import csv
 import io
 
 from catalogs.models import MovementType
+from .money import movement_amount
+
+NO_CLP_RATE_MESSAGE = "Todavía no hay tasa del peso chileno para calcular el monto en CLP."
 
 HEADERS = [
     "Fecha",
@@ -12,6 +15,7 @@ HEADERS = [
     "Descripción",
     "Método de pago",
     "Monto USD",
+    "Monto CLP",
     "Monto anotado",
     "Moneda anotada",
     "Tasa usada",
@@ -33,8 +37,9 @@ def number(value):
     return "" if value is None else str(value).replace(".", ",")
 
 
-def row(movement):
+def row(movement, rate):
     is_expense = movement.category.movement_type.code == MovementType.EXPENSE
+    amount_clp = movement_amount(movement, "CLP", rate)
     return [
         movement.date.strftime("%d/%m/%Y"),
         text(movement.category.movement_type.name),
@@ -42,6 +47,7 @@ def row(movement):
         text(movement.description),
         text(movement.payment_method.name),
         number(-movement.amount if is_expense else movement.amount),
+        number(-amount_clp if is_expense else amount_clp),
         number(movement.original_amount),
         text(movement.original_currency.code),
         number(movement.exchange_rate),  # vacía si se anotó en USD
@@ -49,11 +55,11 @@ def row(movement):
     ]
 
 
-def movements_csv(movements):
+def movements_csv(movements, rate):
     """El archivo completo como texto, con BOM para que Excel lea bien las tildes."""
     buffer = io.StringIO()
     buffer.write("﻿")
     writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
     writer.writerow(HEADERS)
-    writer.writerows(row(movement) for movement in movements)
+    writer.writerows(row(movement, rate) for movement in movements)
     return buffer.getvalue()

@@ -1,11 +1,13 @@
 from decimal import Decimal
 
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from catalogs.models import Category
+from catalogs.models import Category, Currency
 from movements.comparison import shift_month
 from movements.models import Movement
 from movements.tests import BaseTestCase
+from rates.models import UsdQuote
 
 from .models import BudgetItem, ShoppingListItem
 from .serializers import FROM_LIST, next_month
@@ -27,6 +29,8 @@ class BudgetTestCase(BaseTestCase):
             category=self.category(category),
             description=description,
             amount=Decimal(amount),
+            original_amount=Decimal(amount),
+            original_currency=Currency.objects.get(code="USD"),
             created_by=self.admin,
         )
 
@@ -207,6 +211,73 @@ class TotalsTests(BudgetTestCase):
         self.assertEqual(data["totals"]["planned"], "0.00")
 
 
+class ChileanBudgetTests(BudgetTestCase):
+    def setUp(self):
+        super().setUp()
+        UsdQuote.objects.create(
+            currency=Currency.objects.get(code="CLP"),
+            date=self.today,
+            units_per_usd=Decimal("984.09"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=timezone.now(),
+        )
+
+    def test_original_clp_amount_survives_create_read_and_non_money_edit(self):
+        for amount in ("5990", "13990"):
+            with self.subTest(amount=amount):
+                response = self.new_item(
+                    description=f"Compra {amount}", amount=amount, currency="CLP"
+                )
+
+                self.assertEqual(response.status_code, 201)
+                item = BudgetItem.objects.get(description=f"Compra {amount}")
+                self.assertEqual(item.original_amount, Decimal(amount))
+                self.assertEqual(item.original_currency.code, "CLP")
+
+                before = (item.amount, item.original_amount, item.original_currency_id)
+                edited = self.client.patch(
+                    f"/api/budget/items/{item.id}/",
+                    {"description": f"Editada {amount}"},
+                    format="json",
+                )
+                self.assertEqual(edited.status_code, 200)
+                item.refresh_from_db()
+                self.assertEqual(
+                    (item.amount, item.original_amount, item.original_currency_id), before
+                )
+
+                data = self.client.get(
+                    f"/api/budget/?month={self.month_text}&currency=CLP"
+                ).json()
+                row = next(row for row in data["items"] if row["id"] == item.id)
+                self.assertEqual(row["amount"], amount)
+
+    def test_clp_totals_match_displayed_budget_and_movement_amounts(self):
+        clp_item = self.item("Partida CLP")
+        response = self.client.patch(
+            f"/api/budget/items/{clp_item.id}/",
+            {"amount": "5990", "currency": "CLP"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.realize(clp_item, amount="13990", currency="CLP")
+        self.item("Partida USD", amount="10.00")
+        self.make_clp_movement("5000")
+
+        data = self.client.get(
+            f"/api/budget/?month={self.month_text}&currency=CLP"
+        ).json()
+        rows = {row["description"]: row for row in data["items"]}
+
+        self.assertEqual(rows["Partida CLP"]["amount"], "5990")
+        self.assertEqual(rows["Partida CLP"]["movement"]["amount"], "13990")
+        self.assertEqual(rows["Partida USD"]["amount"], "9841")
+        self.assertEqual(
+            data["totals"],
+            {"planned": "15831", "done": "13990", "pending": "9841", "unplanned": "5000"},
+        )
+
+
 class ProposalTests(BudgetTestCase):
     def setUp(self):
         super().setUp()
@@ -258,6 +329,36 @@ class ProposalTests(BudgetTestCase):
             [("Alquiler", "365.00"), ("Entretenimiento", "43.15")],
         )
         self.assertTrue(all(item.movement is None for item in created))
+
+    def test_proposal_can_save_an_item_in_its_selected_currency(self):
+        UsdQuote.objects.create(
+            currency=Currency.objects.get(code="CLP"),
+            date=self.today,
+            units_per_usd=Decimal("984.09"),
+            source=UsdQuote.MINDICADOR,
+            fetched_at=timezone.now(),
+        )
+        response = self.client.post(
+            "/api/budget/proposal/",
+            {
+                "month": self.month_text,
+                "items": [
+                    {
+                        "description": "Luz en pesos",
+                        "category": self.category("Servicios").id,
+                        "amount": "5990",
+                        "currency": "CLP",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        item = BudgetItem.objects.get(month=self.month)
+        self.assertEqual(item.original_amount, Decimal("5990"))
+        self.assertEqual(item.original_currency.code, "CLP")
+        self.assertEqual(item.amount, Decimal("6.09"))
 
     def test_one_bad_item_creates_nothing(self):
         chosen = [
@@ -311,6 +412,9 @@ class ShoppingListTests(BudgetTestCase):
         self.assertEqual(response.status_code, 201)
         data = response.json()
         self.assertEqual(data["amount"], "10.34")  # 3,60 + 6,74
+        item = BudgetItem.objects.get(pk=data["id"])
+        self.assertEqual(item.original_amount, Decimal("10.34"))
+        self.assertEqual(item.original_currency.code, "USD")
         self.assertEqual(data["category"]["name"], "Alimentación")
         self.assertEqual([line["total"] for line in data["shopping_list"]], ["3.60", "6.74"])
         listed = self.client.get(f"/api/budget/?month={self.month_text}").json()

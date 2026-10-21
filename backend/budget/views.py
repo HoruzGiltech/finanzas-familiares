@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Sum
@@ -9,8 +9,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import CanEditMovements
-from catalogs.models import MovementType
+from catalogs.models import Currency, MovementType
 from movements.comparison import shift_month
+from movements.money import CLP_CODE, movement_amount
 from movements.models import Movement
 from movements.serializers import MovementWriteSerializer
 from movements.views import read_view
@@ -29,12 +30,17 @@ NOT_DONE = "Esta partida todavía no está realizada."
 LIST_LOCKED = "La lista de una partida realizada no se cambia: deshazla antes."
 
 
-def movement_data(movement, convert, user):
+def movement_data(movement, convert, user, currency_code="USD", rate=None):
     """El movimiento de una partida realizada."""
+    amount = (
+        movement_amount(movement, currency_code, rate)
+        if rate is not None
+        else convert(movement.amount)
+    )
     return {
         "id": movement.id,
         "date": movement.date.isoformat(),
-        "amount": str(convert(movement.amount)),
+        "amount": str(amount),
         "original_amount": str(movement.original_amount),
         "original_currency": movement.original_currency.code,
         "payment_method": movement.payment_method.name,
@@ -75,15 +81,37 @@ def create_item(family, user, data):
     return item
 
 
-def item_data(item, convert, user):
+def budget_amount(item, currency_code, rate):
+    """El monto mostrado, preservando el original cuando se ve esa moneda."""
+    if item.original_currency.code == currency_code:
+        amount = item.original_amount
+    elif currency_code == "USD":
+        amount = item.amount
+    else:
+        amount = rate.from_usd(item.amount, currency_code)
+    if currency_code == CLP_CODE:
+        return amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return amount
+
+
+def item_data(item, convert, user, currency_code="USD", rate=None):
     """Lo que la API devuelve de una partida. Los montos, en la moneda que se ve."""
+    amount = (
+        budget_amount(item, currency_code, rate)
+        if rate is not None
+        else convert(item.amount)
+    )
     return {
         "id": item.id,
         "month": item.month.strftime("%Y-%m"),
         "description": item.description,
         "category": {"id": item.category_id, "name": item.category.name},
-        "amount": str(convert(item.amount)),
-        "movement": movement_data(item.movement, convert, user) if item.is_done else None,
+        "amount": str(amount),
+        "movement": (
+            movement_data(item.movement, convert, user, currency_code, rate)
+            if item.is_done
+            else None
+        ),
         "shopping_list": shopping_list_data(item),
     }
 
@@ -91,7 +119,12 @@ def item_data(item, convert, user):
 def items_of(family, month):
     return (
         BudgetItem.objects.filter(family=family, month=month)
-        .select_related("category", "movement__payment_method", "movement__original_currency")
+        .select_related(
+            "category",
+            "original_currency",
+            "movement__payment_method",
+            "movement__original_currency",
+        )
         .prefetch_related("shopping_list")
         .order_by("-amount", "description", "id")  # de mayor a menor (spec 011)
     )
@@ -110,26 +143,79 @@ class BudgetView(APIView):
         month = view.month.replace(day=1)
         items = list(items_of(family, month))
 
-        planned = sum((item.amount for item in items), ZERO)
-        done = sum((item.movement.amount for item in items if item.is_done), ZERO)
-        pending = sum((item.amount for item in items if not item.is_done), ZERO)
+        if view.currency.code == CLP_CODE:
+            planned = sum(
+                (budget_amount(item, CLP_CODE, view.rate) for item in items),
+                ZERO,
+            )
+            done = sum(
+                (
+                    movement_amount(item.movement, CLP_CODE, view.rate)
+                    for item in items
+                    if item.is_done
+                ),
+                ZERO,
+            )
+            pending = sum(
+                (
+                    budget_amount(item, CLP_CODE, view.rate)
+                    for item in items
+                    if not item.is_done
+                ),
+                ZERO,
+            )
+        else:
+            planned = sum((item.amount for item in items), ZERO)
+            done = sum((item.movement.amount for item in items if item.is_done), ZERO)
+            pending = sum((item.amount for item in items if not item.is_done), ZERO)
         # Gastos del mes que no vienen de ninguna partida.
-        unplanned = view.movements.filter(
+        unplanned_movements = view.movements.filter(
             category__movement_type__code=MovementType.EXPENSE, budget_item__isnull=True
-        ).aggregate(total=Sum("amount"))["total"] or ZERO
+        )
+        if view.currency.code == CLP_CODE:
+            unplanned = sum(
+                (
+                    movement_amount(movement, CLP_CODE, view.rate)
+                    for movement in unplanned_movements.select_related("original_currency")
+                ),
+                ZERO,
+            )
+        else:
+            unplanned = (
+                unplanned_movements.aggregate(total=Sum("amount"))["total"] or ZERO
+            )
+
+        if view.currency.code == CLP_CODE:
+            totals = {
+                "planned": str(planned.quantize(Decimal("1"))),
+                "done": str(done.quantize(Decimal("1"))),
+                "pending": str(pending.quantize(Decimal("1"))),
+                "unplanned": str(unplanned.quantize(Decimal("1"))),
+            }
+        else:
+            totals = {
+                "planned": str(view.convert(planned)),
+                "done": str(view.convert(done)),
+                "pending": str(view.convert(pending)),
+                "unplanned": str(view.convert(unplanned)),
+            }
 
         return Response(
             {
                 **view.header(),
-                "totals": {
-                    "planned": str(view.convert(planned)),
-                    "done": str(view.convert(done)),
-                    "pending": str(view.convert(pending)),
-                    "unplanned": str(view.convert(unplanned)),
-                },
+                "totals": totals,
                 # La propuesta se ofrece si este mes está vacío y el anterior no.
                 "can_propose": not items and has_items(family, shift_month(month, -1)),
-                "items": [item_data(item, view.convert, request.user) for item in items],
+                "items": [
+                    item_data(
+                        item,
+                        view.convert,
+                        request.user,
+                        view.currency.code,
+                        view.rate,
+                    )
+                    for item in items
+                ],
             }
         )
 
@@ -205,6 +291,8 @@ class ShoppingListView(APIView):
             if item.is_done:
                 raise ValidationError({"detail": [LIST_LOCKED]})
             item.amount = list_amount(lines)
+            item.original_amount = item.amount
+            item.original_currency = Currency.objects.get(is_base=True)
             item.save()
             save_shopping_list(item, lines)
         item = items_of(request.user.family, item.month).get(pk=item.pk)

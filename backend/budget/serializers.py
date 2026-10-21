@@ -71,7 +71,7 @@ class BudgetItemWriteSerializer(serializers.Serializer):
     para que pueda conservar una categoría que ya se desactivó.
 
     `amount` es lo que se escribió, en la moneda `currency` (USD si falta). Al
-    validar se pasa a USD con la tasa de hoy: es lo único que se guarda.
+    validar se pasa a USD con la tasa de hoy y se conserva el monto original.
 
     Al crear se puede enviar `shopping_list` en vez de `amount`: la partida nace
     con su lista y su monto es el total (spec 011). Sin `category`, la lista va a
@@ -132,7 +132,7 @@ class BudgetItemWriteSerializer(serializers.Serializer):
         has_list = "shopping_list" in attrs or (
             self.instance is not None and self.instance.shopping_list.exists()
         )
-        if has_list and "amount" in attrs:
+        if has_list and ("amount" in attrs or "currency" in attrs):
             raise serializers.ValidationError({"amount": FROM_LIST})
         if self.instance is None and not has_list and "amount" not in attrs:
             raise serializers.ValidationError({"amount": "Escribe el monto."})
@@ -142,10 +142,28 @@ class BudgetItemWriteSerializer(serializers.Serializer):
         currency = attrs.pop("currency", None)
         if "shopping_list" in attrs:
             attrs["amount"] = list_amount(attrs["shopping_list"])
-        elif "amount" in attrs:
-            currency = currency or Currency.objects.get(is_base=True)
-            # Mismas reglas que un movimiento: tasa de hoy y límites en USD.
-            attrs["amount"] = money_fields(attrs["amount"], currency)["amount"]
+            attrs["original_amount"] = attrs["amount"]
+            attrs["original_currency"] = Currency.objects.get(is_base=True)
+        elif "amount" in attrs or currency is not None:
+            if self.instance is None:
+                amount = attrs["amount"]
+                currency = currency or Currency.objects.get(is_base=True)
+            else:
+                amount = attrs.get("amount", self.instance.original_amount)
+                currency = currency or self.instance.original_currency
+                if (
+                    amount == self.instance.original_amount
+                    and currency == self.instance.original_currency
+                ):
+                    attrs.pop("amount", None)
+                    return attrs
+
+            money = money_fields(amount, currency)
+            attrs.update(
+                amount=money["amount"],
+                original_amount=money["original_amount"],
+                original_currency=money["original_currency"],
+            )
         return attrs
 
 

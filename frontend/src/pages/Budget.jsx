@@ -531,6 +531,8 @@ export default function Budget() {
           >
             <BudgetProposal
               month={month}
+              catalogs={catalogs}
+              rate={data?.rate}
               usdSymbol={symbols[BASE]}
               onCreated={() => {
                 setProposing(false);

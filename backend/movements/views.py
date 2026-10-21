@@ -16,6 +16,7 @@ from catalogs.models import Currency, MovementType
 from rates.services import NO_RATE_MESSAGE, TodayRate, rate_data, today_rate
 
 from . import comparison, export, summary
+from .money import CLP_CODE, movement_amount
 from .models import Movement
 from .serializers import (
     ExportFilterSerializer,
@@ -25,17 +26,31 @@ from .serializers import (
 )
 
 
-def month_totals(movements, convert):
+def month_totals(movements, view):
     """Suma de ingresos, suma de gastos y su diferencia, en la moneda que se ve.
 
-    Se suma en USD y se convierte cada total, para no acumular redondeos.
+    En CLP se suman los importes individuales para que coincidan con las filas.
     """
+    if view.currency.code == CLP_CODE:
+        rows = movements.select_related("category__movement_type", "original_currency")
+        totals = {MovementType.INCOME: Decimal("0"), MovementType.EXPENSE: Decimal("0")}
+        for movement in rows:
+            code = movement.category.movement_type.code
+            totals[code] += view.amount_for_movement(movement)
+        income = totals[MovementType.INCOME]
+        expense = totals[MovementType.EXPENSE]
+        return {
+            "income": str(income),
+            "expense": str(expense),
+            "balance": str(income - expense),
+        }
+
     rows = movements.values("category__movement_type__code").annotate(total=Sum("amount"))
     by_type = {row["category__movement_type__code"]: row["total"] for row in rows}
     income = by_type.get(MovementType.INCOME, Decimal("0.00"))
     expense = by_type.get(MovementType.EXPENSE, Decimal("0.00"))
     # Como texto, igual que los montos de cada movimiento, para no perder decimales.
-    income, expense = convert(income), convert(expense)
+    income, expense = view.convert(income), view.convert(expense)
     # El balance se resta ya convertido para que en pantalla cuadre al céntimo.
     return {
         "income": str(income),
@@ -59,6 +74,9 @@ class MonthView:
         if self.currency.is_base:
             return amount
         return self.rate.from_usd(amount, self.currency.code)
+
+    def amount_for_movement(self, movement):
+        return movement_amount(movement, self.currency.code, self.rate)
 
     def header(self):
         """Lo que toda respuesta del mes repite: mes, moneda y tasa."""
@@ -115,9 +133,15 @@ class MovementListView(APIView):
         return Response(
             {
                 **view.header(),
-                "totals": month_totals(view.movements, view.convert),
+                "totals": month_totals(view.movements, view),
                 "movements": MovementSerializer(
-                    movements, many=True, context={"user": request.user, "convert": view.convert}
+                    movements,
+                    many=True,
+                    context={
+                        "user": request.user,
+                        "convert": view.convert,
+                        "display_amount": view.amount_for_movement,
+                    },
                 ).data,
             }
         )
@@ -141,8 +165,14 @@ class MovementSummaryView(APIView):
         return Response(
             {
                 **view.header(),
-                "totals": month_totals(view.movements, view.convert),
-                **summary.expense_summary(view.movements, view.convert),
+                "totals": month_totals(view.movements, view),
+                **summary.expense_summary(
+                    view.movements,
+                    view.convert,
+                    display_amount=(
+                        view.amount_for_movement if view.currency.code == CLP_CODE else None
+                    ),
+                ),
             }
         )
 
@@ -158,7 +188,13 @@ class MovementComparisonView(APIView):
             {
                 **view.header(),
                 **comparison.comparison(
-                    family_movements, month, timezone.localdate(), view.convert
+                    family_movements,
+                    month,
+                    timezone.localdate(),
+                    view.convert,
+                    display_amount=(
+                        view.amount_for_movement if view.currency.code == CLP_CODE else None
+                    ),
                 ),
             }
         )
@@ -179,8 +215,12 @@ class MovementExportView(APIView):
             )
             .order_by("date", "id")  # del más antiguo al más reciente
         )
+        rate = today_rate()
+        if CLP_CODE not in rate.bs_per_unit:
+            raise ValidationError({"currency": [export.NO_CLP_RATE_MESSAGE]})
         response = HttpResponse(
-            export.movements_csv(movements), content_type="text/csv; charset=utf-8"
+            export.movements_csv(movements, rate),
+            content_type="text/csv; charset=utf-8",
         )
         filename = f"movimientos-{start.isoformat()}-a-{end.isoformat()}.csv"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'

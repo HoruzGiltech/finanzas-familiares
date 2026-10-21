@@ -1,23 +1,27 @@
 import { useEffect, useState } from "react";
 
+import { useAuth } from "../auth/AuthContext.jsx";
 import { apiGet, apiPost, readErrors } from "../lib/api.js";
+import { currencyDecimals, entryCurrency } from "../lib/currency.js";
 import { formatMoney, formatMonthName } from "../lib/format.js";
-import { amountForApi } from "./AmountField.jsx";
+import { approxConvert } from "../lib/rates.js";
+import AmountField, { amountForApi, amountForInput } from "./AmountField.jsx";
 import Alert from "./Alert.jsx";
 import Button from "./Button.jsx";
 import Skeleton from "./Skeleton.jsx";
 
-// "365.00" -> "365,00", como se escribe aquí.
-const typed = (amount) => amount.replace(".", ",");
+function inputAmount(amount, currency, currencies, rate) {
+  const value =
+    currency === "USD" ? Number(amount) : approxConvert(Number(amount), "USD", currency, rate);
+  return amountForInput(String(value), currencyDecimals(currencies, currency));
+}
 
-// Una fila de la propuesta: casilla para incluirla y su monto (en USD), editable.
-// Con lista del supermercado (spec 011) el monto es el total de la lista y no
-// se cambia aquí, sino en la lista una vez creada.
-function Row({ row, onChange, usd, error }) {
+// Con lista del supermercado el monto sale de sus productos y no se edita aquí.
+function Row({ row, onChange, currencies, rate, usd, error }) {
   const id = `proposal-${row.key}`;
   return (
     <li className="py-2">
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <input
           id={id}
           type="checkbox"
@@ -34,19 +38,23 @@ function Row({ row, onChange, usd, error }) {
             {formatMoney(row.amount.replace(",", "."), usd)}
           </span>
         ) : (
-          <label className="flex shrink-0 items-center gap-1">
-            <span className="text-sm text-muted-foreground">{usd}</span>
-            <span className="sr-only">Monto de {row.description} en dólares</span>
-            <input
-              inputMode="decimal"
-              value={row.amount}
-              disabled={!row.chosen}
-              onChange={(event) => onChange({ ...row, amount: event.target.value })}
-              className="min-h-11 w-24 rounded-lg border border-border bg-card px-2 text-right text-base tabular-nums disabled:opacity-50"
-            />
-          </label>
+          null
         )}
       </div>
+      {!row.list && (
+        <div className="ml-8 mt-2">
+          <AmountField
+            label={`Monto de ${row.description}`}
+            amount={row.amount}
+            currency={row.currency}
+            onAmountChange={(amount) => onChange({ ...row, amount })}
+            onCurrencyChange={(currency) => onChange({ ...row, currency })}
+            currencies={currencies}
+            rate={rate}
+            disabled={!row.chosen}
+          />
+        </div>
+      )}
       {error && (
         <p role="alert" className="mt-1 text-sm text-danger">
           {error}
@@ -56,11 +64,17 @@ function Row({ row, onChange, usd, error }) {
   );
 }
 
-// La propuesta del mes a partir del anterior (spec 010, sección 4). Todo en
-// USD, que es como se guarda el presupuesto. Las partidas del mes anterior
-// vienen marcadas, con lo que realmente se gastó; los gastos sin presupuestar,
-// desmarcados.
-export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }) {
+// La propuesta conserva sus valores en USD, pero permite anotarlos en la moneda
+// inicial de la familia antes de crear cada partida.
+export default function BudgetProposal({
+  month,
+  catalogs,
+  rate,
+  usdSymbol,
+  onCreated,
+  onCancel,
+}) {
+  const { user } = useAuth();
   const [rows, setRows] = useState(null); // null = cargando
   const [previousMonth, setPreviousMonth] = useState("");
   const [errors, setErrors] = useState({});
@@ -75,12 +89,14 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
           return;
         }
         setPreviousMonth(data.previous_month);
+        const initialCurrency = entryCurrency(user, rate);
         setRows([
           ...data.items.map((item, index) => ({
             key: `item-${index}`,
             description: item.description,
             category: item.category,
-            amount: typed(item.proposed),
+            amount: inputAmount(item.proposed, initialCurrency, catalogs.currencies, rate),
+            currency: initialCurrency,
             chosen: true,
             list: item.shopping_list.length > 0 ? item.shopping_list : null,
             detail:
@@ -95,7 +111,8 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
             key: `unplanned-${row.category.id}`,
             description: row.category.name,
             category: row.category,
-            amount: typed(row.amount),
+            amount: inputAmount(row.amount, initialCurrency, catalogs.currencies, rate),
+            currency: initialCurrency,
             chosen: false,
             unplanned: true,
             detail: "Gastado sin presupuestar",
@@ -103,7 +120,7 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
         ]);
       })
       .catch((err) => setGeneralError(err.message));
-  }, [month, usdSymbol]);
+  }, [month, usdSymbol, catalogs.currencies, rate, user]);
 
   function update(changed) {
     setRows((current) => current.map((row) => (row.key === changed.key ? changed : row)));
@@ -133,7 +150,13 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
                   unit_price,
                 })),
               }
-            : { amount: amountForApi(row.amount) }),
+            : {
+                amount: amountForApi(
+                  row.amount,
+                  currencyDecimals(catalogs.currencies, row.currency),
+                ),
+                currency: row.currency,
+              }),
         })),
       });
       if (ok) {
@@ -167,7 +190,14 @@ export default function BudgetProposal({ month, usdSymbol, onCreated, onCancel }
 
   const planned = rows.filter((row) => !row.unplanned);
   const unplanned = rows.filter((row) => row.unplanned);
-  const rowProps = (row) => ({ row, onChange: update, usd: usdSymbol, error: errors[row.key] });
+  const rowProps = (row) => ({
+    row,
+    onChange: update,
+    currencies: catalogs.currencies,
+    rate,
+    usd: usdSymbol,
+    error: errors[row.key],
+  });
 
   return (
     <div>

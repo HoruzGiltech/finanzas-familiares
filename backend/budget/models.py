@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models
 
 from accounts.models import Family
-from catalogs.models import Category
+from catalogs.models import Category, Currency
 from movements.models import Movement
 
 
@@ -21,6 +21,8 @@ class BudgetItem(models.Model):
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="budget_items")
     description = models.CharField(max_length=200)
     amount = models.DecimalField(max_digits=12, decimal_places=2)  # en USD, siempre positivo
+    original_amount = models.DecimalField(max_digits=16, decimal_places=2)
+    original_currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
     # SET_NULL: si el movimiento se borra desde Movimientos, la partida vuelve a pendiente.
     movement = models.OneToOneField(
         Movement,
